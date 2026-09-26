@@ -15,7 +15,24 @@ let wakeLock = null;
 let setupStep = 0;
 let ritualView = null; // какой ритуал показан: null — по времени суток
 let ritualOpen = false; // развернуть уже сделанный ритуал
-let restMore = false; // вечер сделан, но хочется ещё — показать выбор времени
+let restMore = false;
+let armed = null; // кнопка, ждущая второго нажатия (опасные действия — в два касания)
+let armTimer = null;
+
+function arm(name) {
+  if (armed === name) {
+    armed = null;
+    clearTimeout(armTimer);
+    return true;
+  }
+  armed = name;
+  clearTimeout(armTimer);
+  armTimer = setTimeout(() => {
+    armed = null;
+    if (tab === 'settings') render();
+  }, 4000);
+  return false;
+} // вечер сделан, но хочется ещё — показать выбор времени
 const RITUAL = { morning: 'Утренние мелочи', evening: 'Вечерние мелочи' };
 let cheer = ''; // похвала после шага — только в памяти, чтобы не повторялась после перезагрузки
 const LIT = 0.7; // с какой чистоты окно комнаты горит в полную силу
@@ -109,9 +126,13 @@ const buddyName = () => (st.buddy || '').trim() || 'Тишка';
 const FINISH_LINES = ['Вот это да! Стало светлее.', 'Спасибо! Мне тут так уютно.', 'Красота. Отдыхайте, я присмотрю.'];
 
 // Домовёнок: пушистый, в шапке-чёлке. Настроения: calm, happy, sleepy, cheer.
+// Настроения: calm — обычный, happy — дома уютно, cheer — только что сделали дело (прыгает, руки вверх),
+// sad — давно не убирались (скучает, не упрекает), sleepy — пауза.
 function mascot(mood = 'calm') {
+  const open = '<circle cx="25" cy="39" r="2.8" class="ink"/><circle cx="39" cy="39" r="2.8" class="ink"/><circle cx="26" cy="38" r=".9" class="shine"/><circle cx="40" cy="38" r=".9" class="shine"/>';
   const eyes = {
-    calm: '<circle cx="25" cy="39" r="2.8" class="ink"/><circle cx="39" cy="39" r="2.8" class="ink"/><circle cx="26" cy="38" r=".9" class="shine"/><circle cx="40" cy="38" r=".9" class="shine"/>',
+    calm: open,
+    sad: open + '<path d="M21 35l6-2.5M43 35l-6-2.5" class="line thin"/>',
     happy: '<path d="M22 40q3-4 6 0M36 40q3-4 6 0" class="line"/>',
     cheer: '<path d="M22 40q3-4 6 0M36 40q3-4 6 0" class="line"/>',
     sleepy: '<path d="M22 40h6M36 40h6" class="line"/>',
@@ -121,6 +142,7 @@ function mascot(mood = 'calm') {
     happy: '<path d="M28 45q4 5 8 0" class="line"/>',
     cheer: '<path d="M28 44q4 7 8 0z" class="ink"/>',
     sleepy: '<circle cx="32" cy="47" r="1.4" class="ink"/>',
+    sad: '<path d="M29 48q3-2 6 0" class="line"/>',
   }[mood];
   const arms = mood === 'cheer' ? '<path d="M12 40l-6-9M52 40l6-9" class="arm"/>' : '<path d="M12 44l-4 4M52 44l4 4" class="arm"/>';
   return `<svg class="mascot ${mood}" viewBox="0 0 64 64" aria-hidden="true">
@@ -130,7 +152,7 @@ function mascot(mood = 'calm') {
     <path d="M11 37C10 17 54 17 53 37C48 29 42 33 37 27C33 32 27 29 25 25C21 31 16 29 11 37Z" class="hair"/>
     <path d="M30 17q2-7 6-5" class="tuft"/>
     <circle cx="19" cy="46" r="3.2" class="cheek"/><circle cx="45" cy="46" r="3.2" class="cheek"/>
-    ${eyes}${mouth}
+    <g class="eyes">${eyes}</g>${mouth}
   </svg>`;
 }
 
@@ -266,11 +288,12 @@ function renderNow() {
   const buddyLine = eveningDone
     ? ['Вечер сделан. Отдыхайте — я присмотрю.', 'happy']
     : back
-    ? ['Я тут всё сторожил. Начнём с малого?', 'calm']
+    ? ['Я скучал! Начнём с малого — вместе веселее.', 'sad']
     : ritualNowFor(t, rLeft) === 'morning' ? [`Доброе утро! ${few(rLeft.length)} — и день пойдёт легче.`, 'happy']
     : ritualNowFor(t, rLeft) === 'evening' ? [`Вечер. ${few(rLeft.length)} — и можно отдыхать. Начнём с первой.`, 'calm']
     : morningDone ? ['Утро сделано — хорошее начало дня.', 'happy']
     : h >= 0.85 ? ['Как хорошо у нас. Можно просто отдохнуть.', 'happy']
+    : h < 0.45 ? ['Что-то я загрустил. Зажжём хотя бы одно окошко?', 'sad']
     : ['Одно маленькое дело — и в доме станет светлее.', 'calm'];
   // Главная кнопка: сначала ежедневный ритуал этого времени суток, если он не сделан.
   const ritualNow = !ritualView && rLeft.length ? L.currentRitual(t) : null;
@@ -414,7 +437,8 @@ function renderSettings() {
     <div class="card">
       <p class="small mut" style="margin-top:0">Заметили неудобство — нажмите ✎ в углу любого экрана, даже во время уборки. Здесь всё соберётся, а потом одной кнопкой отправите разработчику.</p>
       ${openNotes.length ? `<ul class="tl notes">${openNotes.map(noteLi).join('')}</ul>
-        <button class="btn wide primary" data-act="notes-copy" style="margin-top:8px">Скопировать всё</button>` : '<button class="btn wide" data-act="note">✎ Записать первое</button>'}
+        <button class="btn wide primary" data-act="notes-copy" style="margin-top:8px">Скопировать всё</button>
+        <button class="btn wide ghost confirm" data-act="notes-clear" style="margin-top:8px">${armed === 'notes-clear' ? 'Точно удалить все заметки? Нажмите ещё раз' : 'Отправили? Очистить заметки'}</button>` : '<button class="btn wide" data-act="note">✎ Записать первое</button>'}
       ${doneNotes.length ? `<details class="done-notes"><summary class="small mut">Решено: ${doneNotes.length}</summary><ul class="tl notes">${doneNotes.map(noteLi).join('')}</ul></details>` : ''}
     </div>
 
@@ -461,8 +485,13 @@ function renderSettings() {
       <button class="btn wide" data-act="export">Сохранить копию</button>
       <label class="btn wide ghost">Загрузить из копии<input type="file" accept="application/json,.json" data-act="import" hidden></label>
     </div>
+    <div class="sec-title">Для тестирования</div>
+    <div class="card stack">
+      <p class="small mut" style="margin:0">Сбросить все отметки «сделано» и историю. Комнаты, питомцы, свои дела, напоминания и заметки останутся.</p>
+      <button class="btn wide ghost confirm" data-act="reset-marks">${armed === 'reset-marks' ? 'Точно сбросить? Нажмите ещё раз' : 'Сбросить отметки'}</button>
+    </div>
     <button class="btn wide ghost" style="margin-top:16px" data-act="setup-again">Пройти знакомство заново</button>
-    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.6</p>`;
+    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.7</p>`;
 }
 
 /* ---------- лист задачи ---------- */
@@ -879,7 +908,7 @@ function renderSession() {
 
   inner(`${top}
     <div class="s-body">
-      <div class="cheer-slot">${cheer ? `<div class="cheer">${say(cheer, 'happy')}</div>` : ''}</div>
+      <div class="cheer-slot">${cheer ? say(cheer, 'cheer').replace('class="bubble"', 'class="bubble fade"') : `<div class="buddy">${mascot('calm')}</div>`}</div>
       <div class="s-kind ${step.kind}">${step.kind === 'prep' ? 'Сначала — пусть средство поработает' : (moved ? 'Переходим: ' : '') + esc(zname(step.zone))}</div>
       <div class="s-text pop">${esc(step.text)}</div>
       ${w ? `<div class="s-why"><b>Даст:</b> ${esc(w[0])}</div>` : ''}
@@ -893,8 +922,11 @@ function renderSession() {
     </div>
     <div class="s-actions">
       <button class="btn primary" data-act="s-done">${step.kind === 'prep' ? 'Нанесено' : 'Готово'}</button>
-      <button class="btn" data-act="s-later" ${hasLater ? '' : 'disabled'}>Позже</button>
-      <button class="btn ghost" data-act="s-skip">Пропустить</button>
+      <div class="s-row">
+        <button class="btn" data-act="s-later" ${hasLater ? '' : 'disabled'}>Позже</button>
+        ${step.kind === 'task' ? '<button class="btn" data-act="s-already">Уже сделано</button>' : ''}
+        <button class="btn ghost" data-act="s-skip">Пропустить</button>
+      </div>
       <button class="link" data-act="s-stop">Хватит на сегодня</button>
     </div>`);
 
@@ -983,6 +1015,15 @@ function sessionAct(act, el) {
     }
     buzz(30);
     ss.idx++;
+  } else if (act === 's-already') {
+    // Сделано раньше, без таймера: засчитываем, но не учимся на времени. Для будущих очков — отдельный признак.
+    L.complete(st, step.id, now(), step.min, false, true);
+    ss.doneIds[step.id] = true;
+    ss.mins[step.id] = 0;
+    ss.done++;
+    ss.zones.push(step.zone);
+    cheer = 'Отлично, одним делом меньше';
+    ss.idx++;
   } else if (act === 's-next') {
     ss.idx++;
   } else if (act === 's-back') {
@@ -1013,7 +1054,7 @@ function sessionAct(act, el) {
     return;
   }
   // Пропускаем уже сделанные шаги при движении вперёд — возвращаться к ним можно кнопкой «‹».
-  if (act === 's-done' || act === 's-skip' || act === 's-next') {
+  if (act === 's-done' || act === 's-skip' || act === 's-next' || act === 's-already') {
     while (ss.idx < ss.steps.length && ss.steps[ss.idx].kind === 'task' && ss.doneIds[ss.steps[ss.idx].id]) ss.idx++;
   }
   ss.stepStart = now();
@@ -1145,6 +1186,18 @@ document.addEventListener('click', (e) => {
     case 'note-del':
       st.notes = st.notes.filter((x) => x.id !== id);
       commit();
+      return render();
+    case 'notes-clear':
+      if (!arm('notes-clear')) return render();
+      st.notes = [];
+      commit();
+      toast('Заметки очищены');
+      return render();
+    case 'reset-marks':
+      if (!arm('reset-marks')) return render();
+      L.resetMarks(st, now());
+      commit();
+      toast('Отметки сброшены — начинаем с чистого листа');
       return render();
     case 'notes-copy':
       return copyNotes();

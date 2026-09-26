@@ -261,12 +261,13 @@ export function sessionMinutes(steps) {
 
 // real — минуты замерены таймером уборки (из них приложение учится, сколько дело занимает у вас).
 // prev — прежняя дата, чтобы отмена вернула всё точно как было.
-export function complete(st, taskId, now, min, real = false) {
+// pre — «уже было сделано» (отмечено в уборке без выполнения сейчас).
+export function complete(st, taskId, now, min, real = false, pre = false) {
   const prev = st.last[taskId];
   st.last[taskId] = clock(st, now);
   const own = (st.custom || []).find((x) => x.id === taskId);
   if (own) own.soon = false;
-  st.log.push({ id: taskId, at: now, min, prev, real });
+  st.log.push(pre ? { id: taskId, at: now, min, prev, real, pre } : { id: taskId, at: now, min, prev, real });
   if (st.log.length > LOG_CAP) st.log.splice(0, st.log.length - LOG_CAP);
 }
 
@@ -563,4 +564,13 @@ export function notesText(st) {
       return `— ${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}${n.ctx ? ` [${n.ctx}]` : ''}: ${n.text}`;
     })
     .join('\n');
+}
+
+// Сброс для тестирования: отметки и история — с чистого листа, настройки дома остаются.
+export function resetMarks(st, now) {
+  st.last = {};
+  st.log = [];
+  st.session = null;
+  st.created = now;
+  for (const c of st.custom || []) c.soon = false;
 }

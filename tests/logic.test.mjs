@@ -291,3 +291,26 @@ test('у каждого дела из базы есть «даст» и «есл
     assert.ok(w && w[0] && w[1], `нет пояснения для ${t.id}`);
   }
 });
+
+test('сброс отметок: история пуста, настройки дома на месте', () => {
+  const st = fresh();
+  st.household.cat = true;
+  L.addCustom(st, NOW, { z: 'bath', t: 'Своё', every: 7, min: 5, soon: true });
+  L.addNote(st, NOW, 'заметка', '');
+  L.complete(st, 'k-dishes', NOW, 10);
+  L.resetMarks(st, NOW + L.DAY);
+  assert.equal(st.log.length, 0);
+  assert.deepEqual(st.last, {});
+  assert.equal(st.household.cat, true);
+  assert.equal(st.custom.length, 1);
+  assert.equal(st.custom[0].soon, false);
+  assert.equal(st.notes.length, 1);
+});
+
+test('«уже сделано» засчитывается, но не учит длительность', () => {
+  const st = fresh();
+  const t = L.task(st, 'b-toilet');
+  for (let i = 0; i < 4; i++) L.complete(st, t.id, NOW, 30, false, true);
+  assert.equal(L.effMin(t, st), t.min);
+  assert.ok(st.log.every((e) => e.pre));
+});

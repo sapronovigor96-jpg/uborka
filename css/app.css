@@ -286,7 +286,14 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .mascot .shine { fill: #fff; }
 .mascot .line { fill: none; stroke: #2a1f14; stroke-width: 2.2; stroke-linecap: round; }
 .mascot .cheek { fill: rgba(236, 142, 120, .5); }
-.mascot.cheer { animation: hop .7s ease-in-out 3; }
+.mascot.cheer { animation: hop .6s ease-in-out 2; }
+.mascot.sad { animation: sway 4s ease-in-out infinite; }
+.mascot.happy { animation: bob 2.4s ease-in-out infinite; }
+.mascot .eyes { transform-origin: 32px 39px; animation: blink 5s infinite; }
+.mascot.happy .eyes, .mascot.cheer .eyes, .mascot.sleepy .eyes { animation: none; }
+.mascot .line.thin { stroke-width: 1.6; }
+@keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+@keyframes sway { 50% { transform: rotate(-4deg); } }
 .mascot.sleepy { animation: none; }
 @keyframes bob { 50% { transform: translateY(-2px); } }
 @keyframes hop { 50% { transform: translateY(-7px); } }
@@ -298,6 +305,13 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .finish .buddy { justify-content: center; margin: 4px 0 10px; }
 .cheer .buddy { margin: 0 0 4px; }
 .cheer-slot { min-height: 58px; display: flex; align-items: flex-end; }
+.cheer-slot .buddy { margin: 0; }
+.cheer-slot .mascot { width: 48px; height: 48px; }
+.bubble.fade { animation: bubble 3.2s ease forwards; font: italic 500 16px var(--serif); color: var(--ok); }
+@keyframes bubble { 0% { opacity: 0; transform: translateY(6px); } 12%, 75% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.s-row { grid-column: 1 / -1; display: flex; gap: 8px; }
+.s-row .btn { flex: 1; padding: 0 6px; font-size: 14px; white-space: nowrap; }
+.confirm { color: var(--warn); }
 .cheer .mascot { width: 44px; height: 44px; }
 
 /* Режим уборки: навигация, пауза, польза */
