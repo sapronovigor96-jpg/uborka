@@ -1,0 +1,1118 @@
+import * as L from './logic.js';
+import * as S from './store.js';
+
+const $ = (sel) => document.querySelector(sel);
+const view = $('#view');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const now = () => Date.now();
+const dela = (n) => `${n} ${L.plural(n, 'дело', 'дела', 'дел')}`;
+
+let st = S.load(now());
+let tab = 'now';
+let openZones = new Set();
+let tick = null;
+let wakeLock = null;
+let setupStep = 0;
+let ritualView = null; // какой ритуал показан: null — по времени суток
+const RITUAL = { morning: 'Утренние мелочи', evening: 'Вечерние мелочи' };
+let cheer = ''; // похвала после шага — только в памяти, чтобы не повторялась после перезагрузки
+const LIT = 0.7; // с какой чистоты окно комнаты горит в полную силу
+
+function commit() {
+  S.save(st);
+}
+
+const zname = (id) => L.zoneLabel(st, id);
+const tname = (t) => L.label(t, st);
+
+/* ---------- общие кусочки ---------- */
+
+function level(h) {
+  return h >= LIT ? '' : h >= 0.4 ? 'mid' : 'low';
+}
+
+function dotClass(u) {
+  return u >= L.DUE ? 'due' : u >= 0.5 ? 'mid' : '';
+}
+
+function taskMeta(t) {
+  // Дата показывается только для реально отмеченных дел — стартовые даты условные.
+  const marked = st.last[t.id] !== undefined && st.log.some((e) => e.id === t.id);
+  const ago = marked ? L.fmtAgo((st.pause ?? now()) - st.last[t.id]) + ' · ' : '';
+  return `${ago}${L.fmtEvery(L.effEvery(t, st))} · ${t.min} мин`;
+}
+
+function isToday(ts) {
+  return ts !== undefined && new Date(ts).toDateString() === new Date().toDateString();
+}
+
+// Домик: каждое окно — комната. Чем чище комната, тем теплее горит свет.
+function house(zones, glowZones = []) {
+  const cols = 3;
+  const rows = Math.ceil(zones.length / cols);
+  const W = 30, H = 26, GX = 12, GY = 12;
+  const bodyH = rows * H + (rows - 1) * GY + 30;
+  const top = 78;
+  const x0 = 100 - (cols * W + (cols - 1) * GX) / 2;
+  const t = now();
+  const wins = zones
+    .map((z, i) => {
+      const h = L.zoneHealth(st, z.id, t);
+      const x = x0 + (i % cols) * (W + GX);
+      const y = top + 15 + Math.floor(i / cols) * (H + GY);
+      const glow = h >= LIT ? 1 : h >= 0.4 ? 0.45 : 0.12;
+      return `<g class="win ${glowZones.includes(z.id) ? 'fresh' : ''}" data-act="go-zone" data-z="${z.id}">
+        <title>${esc(zname(z.id))}</title>
+        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="3" class="win-dark"/>
+        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="3" class="win-lit" style="opacity:${glow}" ${glow === 1 ? 'filter="url(#glow)"' : ''}/>
+        <path d="M${x + W / 2} ${y}v${H}M${x} ${y + H / 2}h${W}" class="win-frame"/>
+      </g>`;
+    })
+    .join('');
+  const bottom = top + bodyH;
+  return `<svg class="house" viewBox="0 0 200 ${bottom + 8}" role="img" aria-label="Дом: окна — комнаты">
+    <defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <path d="M140 44v-22h14v32" class="chimney"/>
+    <path class="smoke" d="M147 16c-5-5 5-8 0-13"/>
+    <path d="M22 ${top + 2}L100 22L178 ${top + 2}Z" class="roof"/>
+    <rect x="34" y="${top}" width="132" height="${bodyH}" rx="4" class="body"/>
+    ${wins}
+    <path d="M26 ${bottom}h148" class="ground"/>
+  </svg>`;
+}
+
+function toast(text, undo) {
+  const el = $('#toast');
+  el.innerHTML = `<span>${esc(text)}</span>${undo ? '<button data-act="undo">Вернуть</button>' : ''}`;
+  // Во время уборки внизу — кнопка «Готово», сообщение не должно её закрывать.
+  el.classList.toggle('top', !$('#session').hidden);
+  el.hidden = false;
+  toast.undo = undo;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => {
+    el.hidden = true;
+    toast.undo = null;
+  }, 5000);
+}
+
+function buzz(ms = 20) {
+  try {
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    navigator.vibrate && navigator.vibrate(ms);
+  } catch {
+    /* нет вибро — не страшно */
+  }
+}
+
+/* ---------- знакомство с домом ---------- */
+
+const ROOMS = [
+  ['bedroom', 'Спальня'],
+  ['living', 'Гостиная'],
+  ['kitchen', 'Кухня'],
+  ['bath', 'Ванная'],
+  ['hall', 'Прихожая'],
+  ['balcony', 'Балкон'],
+  ['kids', 'Детская'],
+  ['work', 'Рабочее место'],
+];
+
+function roomOn(id) {
+  const o = st.zonesOn[id];
+  return o === undefined ? L.zoneOn({ ...st, merged: false }, id) : o;
+}
+
+function petFields() {
+  const h = st.household;
+  return `<div class="row"><div>Собака</div>${sw('pet', h.dog, 'data-k="dog"')}</div>
+    ${h.dog ? `<input class="field" data-act="petname" data-k="dogName" placeholder="Имя" value="${esc(h.dogName)}" maxlength="20">` : ''}
+    <div class="row"><div>Кошка или кот</div>${sw('pet', h.cat, 'data-k="cat"')}</div>
+    ${h.cat ? `<input class="field" data-act="petname" data-k="catName" placeholder="Имя" value="${esc(h.catName)}" maxlength="20">` : ''}`;
+}
+
+function renderSetup() {
+  const el = $('#setup');
+  el.hidden = false;
+  const h = st.household;
+  const steps = [
+    () => `<div class="s-kind">Знакомство · 1 из 3</div>
+      <h1>Какие комнаты есть дома?</h1>
+      <p class="mut">Отметьте всё, где хочется поддерживать уют.</p>
+      <div class="chips big">${ROOMS.filter(([id]) => !(st.merged && id === 'living'))
+        .map(([id, n]) => `<button class="chip ${roomOn(id) ? 'on' : ''}" data-act="room" data-z="${id}">${id === 'kitchen' && st.merged ? 'Кухня-гостиная' : n}</button>`)
+        .join('')}</div>
+      <div class="card" style="margin-top:18px"><div class="row"><div>Кухня и гостиная — одна комната<small>Будут одним окном в домике</small></div>${sw('merged', st.merged)}</div></div>`,
+    () => `<div class="s-kind">Знакомство · 2 из 3</div>
+      <h1>Кто живёт с вами?</h1>
+      <p class="mut">От этого зависит, как часто нужен пол, стирка и что ещё добавить.</p>
+      <div class="card">${petFields()}
+        <div class="row"><div>Дети</div>${sw('hh', h.kids, 'data-k="kids"')}</div>
+        <div class="row"><div>Аллергия на пыль</div>${sw('hh', h.allergy, 'data-k="allergy"')}</div></div>`,
+    () => `<div class="s-kind">Знакомство · 3 из 3</div>
+      <h1>Когда в последний раз была большая уборка?</h1>
+      <p class="mut">Честный ответ поможет не завалить делами в первый день.</p>
+      <div class="stack">
+        <button class="btn wide opt" data-act="ago" data-v="0">Недавно — дома порядок</button>
+        <button class="btn wide opt" data-act="ago" data-v="1">Неделю-две назад</button>
+        <button class="btn wide opt" data-act="ago" data-v="2">Давно — кое-что накопилось</button>
+        ${st.log.length ? '<button class="btn wide ghost" data-act="setup-keep">Оставить мои отметки как есть</button>' : ''}
+      </div>`,
+  ];
+  el.innerHTML = `<div class="inner">
+    <div class="s-body setup-body">${steps[setupStep]()}</div>
+    <div class="s-actions">
+      ${setupStep < 2 ? `<button class="btn primary" data-act="setup-next">Дальше</button>` : ''}
+      ${setupStep > 0 ? `<button class="btn ghost" data-act="setup-back">Назад</button>` : ''}
+    </div></div>`;
+}
+
+/* ---------- вкладка «Сейчас» ---------- */
+
+const BUDGETS = [
+  [15, 'Немного заботы'],
+  [30, 'Спокойная уборка'],
+  [60, 'Большая забота'],
+];
+const AWAY_DAYS = 3; // после стольких дней без отметок — встречаем «с возвращением»
+
+function greeting() {
+  const hr = new Date().getHours();
+  return hr < 6 ? 'Доброй ночи' : hr < 12 ? 'Доброе утро' : hr < 18 ? 'Добрый день' : 'Добрый вечер';
+}
+
+function weekDots() {
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toDateString();
+    const on = st.log.some((e) => new Date(e.at).toDateString() === key);
+    days.push(`<i class="${on ? 'on' : ''}" title="${d.toLocaleDateString('ru', { weekday: 'short' })}"></i>`);
+  }
+  return `<div class="week">${days.join('')}</div>`;
+}
+
+function renderNow() {
+  const t = now();
+  const zones = L.zonesShown(st);
+  const lit = zones.filter((z) => L.zoneHealth(st, z.id, t) >= LIT).length;
+  const h = L.homeHealth(st, t);
+  const active = L.activeTasks(st);
+  const which = ritualView || L.currentRitual(t);
+  const other = which === 'morning' ? 'evening' : 'morning';
+  const rList = L.ritual(st, which);
+  const rDone = rList.filter((x) => isToday(st.last[x.id])).length;
+  const rLeft = L.ritualSteps(st, which, t);
+  const oList = L.ritual(st, other);
+  const oDone = oList.filter((x) => isToday(st.last[x.id])).length;
+  const due = L.dueTasks(st, t).filter((x) => L.effEvery(x.t, st) > 1);
+  const wk = L.stats(st, t);
+  const lastAct = st.log.length ? st.log[st.log.length - 1].at : null;
+  const back = lastAct !== null && t - lastAct >= AWAY_DAYS * L.DAY && st.pause === null;
+  const title = back
+    ? 'С возвращением'
+    : h >= 0.85 ? 'Дома уютно' : h >= 0.65 ? 'Дому нужно чуть-чуть заботы' : h >= 0.45 ? 'Дом соскучился по вам' : 'Зажжём одно окошко?';
+  const small = L.buildSession(st, t, 5).filter((x) => x.kind === 'task').length;
+  // Главная кнопка: сначала ежедневный ритуал этого времени суток, если он не сделан.
+  const ritualNow = !ritualView && rLeft.length ? L.currentRitual(t) : null;
+  const mainBtn = ritualNow
+    ? `<button class="btn primary wide start-small" data-act="ritual" data-w="${ritualNow}">${RITUAL[ritualNow]}<small>${dela(rLeft.length)} · по шагам</small></button>`
+    : small
+      ? `<button class="btn primary wide start-small" data-act="start" data-b="5">Начать с малого<small>5 минут · ${dela(small)}</small></button>`
+      : '';
+
+  const budgets = BUDGETS.map(([b, name]) => {
+    const n = L.buildSession(st, t, b).filter((s) => s.kind === 'task').length;
+    return `<button class="budget" data-act="start" data-b="${b}" ${n ? '' : 'disabled'}>
+      <b>${b} мин</b><em>${name}</em><span>${n ? dela(n) : 'всё сделано'}</span></button>`;
+  }).join('');
+
+  view.innerHTML = `
+    ${st.pause !== null ? `<div class="card pause-banner"><div><b>Вы в отпуске</b><div class="small mut">Дом подождёт, сроки не идут</div></div>
+      <button class="btn" data-act="pause-off">Я дома</button></div>` : ''}
+    ${S.persistent ? '' : '<div class="card s-warn">Браузер не даёт сохранять данные — после закрытия всё сбросится.</div>'}
+    <div class="hello mut">${greeting()}</div>
+    <div class="hero">
+      ${house(zones)}
+      <h1>${title}</h1>
+      <div class="mut small">${back ? 'Ничего не потеряно — начнём с малого' : `Свет горит в ${lit} из ${zones.length} ${L.plural(zones.length, 'комнаты', 'комнат', 'комнат')}`}</div>
+    </div>
+    ${mainBtn}
+
+    <div class="sec-title">${ritualNow ? 'Или уборка на время' : 'Есть больше времени?'}</div>
+    <div class="budgets three">${budgets}</div>
+    ${L.buildSession(st, t, 60).length === 0 ? `<button class="btn wide ghost" style="margin-top:10px" data-act="start-ahead">Сделать что-нибудь заранее · 15 мин</button>` : ''}
+    <div class="rooms-pick"><span class="mut small">Или одна комната:</span>
+      <div class="chips">${zones
+        .filter((z) => z.id !== 'home')
+        .map((z) => {
+          const n = L.dueTasks(st, t).filter((x) => L.zoneOf(x.t, st) === z.id).length;
+          return `<button class="chip" data-act="room-sheet" data-z="${z.id}">${esc(zname(z.id))}${n ? '<i class="chip-dot"></i>' : ''}</button>`;
+        })
+        .join('')}</div></div>
+
+    ${rList.length || oList.length ? `<div class="sec-title">${RITUAL[which]} <span class="count">${rDone} из ${rList.length}</span></div>
+    <div class="card">
+    ${rLeft.length && !ritualNow ? `<button class="btn wide ritual-go" data-act="ritual" data-w="${which}">Пройти по шагам · ${dela(rLeft.length)}</button>` : ''}
+    ${rList.length && !rLeft.length ? `<p class="small ok-note">${which === 'morning' ? 'Утро сделано — хорошего дня.' : 'Вечер сделан — можно отдыхать.'}</p>` : ''}
+    <ul class="tl daily">${rList
+      .map((x) => {
+        const done = isToday(st.last[x.id]);
+        return `<li class="${done ? 'is-done' : ''}"><button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${x.id}" aria-label="Сделано">✓</button>
+          <button class="tt" data-act="task" data-id="${x.id}">${esc(tname(x))}<small>${esc(zname(L.zoneOf(x, st)))} · ${x.min} мин</small></button></li>`;
+      })
+      .join('')}</ul>
+      ${oList.length ? `<button class="more" data-act="ritual-switch" data-w="${other}">${RITUAL[other]}: ${oDone} из ${oList.length} →</button>` : ''}</div>` : ''}
+
+    ${due.length ? `<div class="sec-title">Ждут заботы</div>
+    <div class="card"><ul class="tl">${due.slice(0, 5).map((x) => taskRow(x.t, true)).join('')}</ul>
+    ${due.length > 5 ? `<button class="more" data-act="tab" data-tab="home">Остальное — в комнатах, оно подождёт</button>` : ''}</div>` : ''}
+
+    <div class="sec-title">Ваша неделя</div>
+    <div class="card week-card">${weekDots()}
+      <div class="small mut">${wk.tasks ? `${dela(wk.tasks)} · ${wk.minutes} мин заботы о доме` : 'Здесь будут отмечаться дни, когда вы заботились о доме.'}</div></div>
+  `;
+}
+
+function taskRow(t, showZone) {
+  const u = L.urgency(t, st, now());
+  return `<li>
+    <span class="dot ${dotClass(u)}"></span>
+    <button class="tt" data-act="task" data-id="${t.id}">${esc(tname(t))}
+      <small>${showZone ? esc(zname(L.zoneOf(t, st))) + ' · ' : ''}${taskMeta(t)}</small></button>
+    <button class="check" data-act="done" data-id="${t.id}" aria-label="Сделано">✓</button>
+  </li>`;
+}
+
+/* ---------- вкладка «Дом» ---------- */
+
+let query = '';
+
+function renderHome() {
+  view.innerHTML = `<h1 class="page-title">Комнаты</h1>
+    <p class="mut small">По порядку уборки — от дальней к выходу. Сделали что-то без приложения — найдите и отметьте.</p>
+    <input class="field search" id="search" data-act="search" type="search" placeholder="Найти дело: пол, лоток, окна…" value="${esc(query)}">
+    <div id="zones">${zonesHtml()}</div>`;
+}
+
+function zonesHtml() {
+  const t = now();
+  const q = query.trim().toLowerCase();
+  const html = L.zonesShown(st)
+      .map((z) => {
+        let ts = L.activeTasks(st).filter((x) => L.zoneOf(x, st) === z.id);
+        if (q) {
+          ts = ts.filter((x) => tname(x).toLowerCase().includes(q));
+          if (!ts.length) return '';
+        }
+        ts.sort((a, b) => L.urgency(b, st, t) - L.urgency(a, st, t));
+        const h = L.zoneHealth(st, z.id, t);
+        const n = ts.filter((x) => L.urgency(x, st, t) >= L.DUE).length;
+        return `<details class="card zone" id="zone-${z.id}" data-zone="${z.id}" ${q || openZones.has(z.id) ? 'open' : ''}>
+          <summary><h3>${esc(zname(z.id))}</h3>
+            <span class="${n ? 'chip-due' : 'chip-ok'}">${n ? `ждут: ${n}` : 'уютно'}</span>
+            <div class="bar ${level(h)}"><i style="width:${Math.round(h * 100)}%"></i></div></summary>
+          ${q ? '' : `<div class="zone-actions">
+            <button class="btn" data-act="room-sheet" data-z="${z.id}">Навести уют здесь</button>
+            <button class="btn ghost" data-act="own-new" data-z="${z.id}">+ Своё дело</button>
+          </div>`}
+          <ul class="tl">${ts.map((x) => taskRow(x, false)).join('')}</ul>
+        </details>`;
+      })
+      .join('');
+  return `<div class="stack">${html || '<p class="mut">Ничего не нашлось. Можно добавить своё дело в любой комнате.</p>'}</div>`;
+}
+
+/* ---------- вкладка «Настройки» ---------- */
+
+function sw(act, checked, extra = '') {
+  return `<label class="switch"><input type="checkbox" data-act="${act}" ${extra} ${checked ? 'checked' : ''}><i></i></label>`;
+}
+
+function renderSettings() {
+  const h = st.household;
+  const off = L.allTasks(st).filter((t) => st.taskOff[t.id]);
+  const r = st.remind;
+  const openNotes = st.notes.filter((n) => !n.done);
+  const doneNotes = st.notes.filter((n) => n.done);
+  const noteLi = (n) => `<li class="${n.done ? 'is-done' : ''}">
+      <button class="check ${n.done ? 'done' : ''}" data-act="note-done" data-id="${n.id}" aria-label="Решено">✓</button>
+      <span class="tt">${esc(n.text)}<small>${new Date(n.at).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${n.ctx ? ' · ' + esc(n.ctx) : ''}</small></span>
+      <button class="x" data-act="note-del" data-id="${n.id}" aria-label="Удалить">×</button></li>`;
+  const timeRow = (k, title, sub, extra = '') => `<div class="rem">
+      <div class="row"><div>${title}<small>${sub}</small></div>${sw('rt-on', r[k].on, `data-k="${k}"`)}</div>
+      ${r[k].on ? `<div class="rem-ctl">${extra}<input class="field time" type="time" data-act="rt-time" data-k="${k}" value="${r[k].time}"></div>` : ''}</div>`;
+  view.innerHTML = `<h1 class="page-title">Настройки</h1>
+
+    <div class="sec-title">Что неудобно <span class="count">${openNotes.length ? openNotes.length : ''}</span></div>
+    <div class="card">
+      <p class="small mut" style="margin-top:0">Заметили неудобство — нажмите ✎ в углу любого экрана, даже во время уборки. Здесь всё соберётся, а потом одной кнопкой отправите разработчику.</p>
+      ${openNotes.length ? `<ul class="tl notes">${openNotes.map(noteLi).join('')}</ul>
+        <button class="btn wide primary" data-act="notes-copy" style="margin-top:8px">Скопировать всё</button>` : '<button class="btn wide" data-act="note">✎ Записать первое</button>'}
+      ${doneNotes.length ? `<details class="done-notes"><summary class="small mut">Решено: ${doneNotes.length}</summary><ul class="tl notes">${doneNotes.map(noteLi).join('')}</ul></details>` : ''}
+    </div>
+
+    <div class="sec-title">Напоминания</div>
+    <div class="card">
+      <p class="small mut" style="margin-top:0">Напоминания живут в календаре телефона — там они надёжно звенят, даже когда приложение закрыто.</p>
+      ${timeRow('morning', 'Утренние мелочи', 'Каждый день')}
+      ${timeRow('evening', 'Вечерние мелочи', 'Каждый день')}
+      ${timeRow('weekly', 'Забота о доме', 'Раз в неделю, около 30 минут',
+        `<select class="field time" data-act="rt-day">${L.WEEKDAYS.map((d, i) => `<option value="${i}" ${r.weekly.day === i ? 'selected' : ''}>${d}</option>`).join('')}</select>`)}
+      <button class="btn wide primary" data-act="rt-ics" style="margin-top:8px">Добавить в календарь</button>
+      <p class="small dim" style="margin-bottom:0">Откроется файл — календарь предложит добавить события. Поменяли время — нажмите ещё раз и удалите старые события «Уборка».</p>
+    </div>
+
+    <div class="sec-title">Кто живёт дома</div>
+    <div class="card">${petFields()}
+      <div class="row"><div>Дети<small>Пол — в 2 раза чаще</small></div>${sw('hh', h.kids, 'data-k="kids"')}</div>
+      <div class="row"><div>Аллергия на пыль<small>Пыль и бельё — в 2 раза чаще</small></div>${sw('hh', h.allergy, 'data-k="allergy"')}</div>
+    </div>
+
+    <div class="sec-title">Комнаты</div>
+    <div class="card">
+      <div class="row"><div>Кухня и гостиная — одна комната</div>${sw('merged', st.merged)}</div>
+      ${ROOMS.filter(([id]) => !(st.merged && id === 'living'))
+        .map(([id, n]) => `<div class="row"><div>${id === 'kitchen' && st.merged ? 'Кухня-гостиная' : n}</div>${sw('zone', roomOn(id), `data-z="${id}"`)}</div>`)
+        .join('')}
+      <div class="row"><div>Весь дом<small>Окна снаружи, датчики, фильтры</small></div>${sw('zone', L.zoneOn(st, 'home'), 'data-z="home"')}</div>
+    </div>
+
+    ${off.length ? `<div class="sec-title">Отключённые дела</div>
+    <div class="card"><ul class="tl">${off.map((t) => `<li><span class="tt">${esc(tname(t))}<small>${esc(zname(L.zoneOf(t, st)))}</small></span>
+      <button class="btn" data-act="task-on" data-id="${t.id}">Вернуть</button></li>`).join('')}</ul></div>` : ''}
+
+    <div class="sec-title">Отпуск</div>
+    <div class="card"><div class="row"><div>Режим отпуска<small>Сроки не идут, пока вас нет дома</small></div>${sw('pause', st.pause !== null)}</div></div>
+
+    <div class="sec-title">Резервная копия</div>
+    <div class="card stack">
+      <p class="small mut" style="margin:0">Данные хранятся только на этом телефоне. Копия — файл, который можно сохранить и потом загрузить обратно.</p>
+      <button class="btn wide" data-act="export">Сохранить копию</button>
+      <label class="btn wide ghost">Загрузить из копии<input type="file" accept="application/json,.json" data-act="import" hidden></label>
+    </div>
+    <button class="btn wide ghost" style="margin-top:16px" data-act="setup-again">Пройти знакомство заново</button>
+    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.5</p>`;
+}
+
+/* ---------- лист задачи ---------- */
+
+const FREQS = [1, 2, 3, 7, 14, 30, 60, 90, 180, 365];
+
+function openSheet(id) {
+  const t = L.task(st, id);
+  if (t.own) return openOwnSheet(t);
+  const cur = L.effEvery(t, st);
+  const own = st.every[id];
+  const kit = L.kitFor(t);
+  $('#sheet').innerHTML = `<h2>${esc(tname(t))}</h2>
+    <div class="mut small">${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
+    ${t.prep ? `<p class="small"><b>Сначала:</b> ${esc(L.label(t, st, t.prep))} — и ${t.wait} мин пусть действует.</p>` : ''}
+    ${t.hint ? `<p class="small mut">${esc(t.hint)}</p>` : ''}
+    ${kit.length ? `<p class="small mut">Понадобится: ${esc(kit.join(', ').toLowerCase())}</p>` : ''}
+    ${t.warn ? `<div class="s-warn">${esc(t.warn)}</div>` : ''}
+    ${whenChips(t)}
+    <div class="sec-title">Как часто</div>
+    <div class="chips">
+      <button class="chip ${own ? '' : 'on'}" data-act="freq" data-id="${id}" data-v="0">Как советуют · ${L.fmtEvery(t.every)}</button>
+      ${FREQS.map((f) => `<button class="chip ${own === f ? 'on' : ''}" data-act="freq" data-id="${id}" data-v="${f}">${L.fmtEvery(f)}</button>`).join('')}
+    </div>
+    ${own ? '' : cur !== t.every ? `<p class="small mut">Сейчас ${L.fmtEvery(cur)} — с учётом того, кто живёт дома.</p>` : ''}
+    <div class="stack" style="margin-top:20px">
+      <button class="btn wide primary" data-act="done" data-id="${id}">Сделано сегодня</button>
+      <button class="btn wide" data-act="done-yday" data-id="${id}">Сделано вчера</button>
+      <button class="btn wide ghost" data-act="task-off" data-id="${id}">Мне это не нужно</button>
+    </div>`;
+  $('#sheet').hidden = false;
+  $('#sheet-bg').hidden = false;
+}
+
+/* ---------- ритуал ---------- */
+
+function startRitual(which) {
+  const steps = L.ritualSteps(st, which, now());
+  if (!steps.length) return;
+  closeSheet();
+  st.session = { steps, idx: 0, prepAt: {}, stepStart: now(), done: 0, min: 0, started: now(), ready: true, zones: [], ritual: which };
+  lockScreen(true);
+  commit();
+  renderSession();
+}
+
+/* ---------- заметки «что неудобно» ---------- */
+
+let noteCtx = '';
+
+function currentCtx() {
+  const ss = st.session;
+  if (ss && ss.ready && ss.idx < ss.steps.length) return `Уборка · шаг «${ss.steps[ss.idx].text}»`;
+  if (ss) return 'Уборка';
+  if (!st.setup) return 'Знакомство';
+  return { now: 'Главная', home: 'Комнаты', settings: 'Настройки' }[tab];
+}
+
+function openNoteSheet() {
+  noteCtx = currentCtx();
+  $('#sheet').innerHTML = `<h2>Что неудобно?</h2>
+    <div class="mut small">Где: ${esc(noteCtx)}</div>
+    <textarea class="field note-text" id="note-text" rows="4" placeholder="Например: кнопка «Позже» слишком близко к «Готово»"></textarea>
+    <div class="stack" style="margin-top:12px">
+      <button class="btn wide primary" data-act="note-save">Записать</button>
+    </div>`;
+  openSheetEl();
+  setTimeout(() => $('#note-text')?.focus(), 50);
+}
+
+async function copyNotes() {
+  const text = 'Заметки из «Уборки» — что неудобно:\n' + L.notesText(st);
+  try {
+    if (navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      await navigator.share({ text });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    toast('Скопировано — вставьте в чат');
+  } catch {
+    // Буфер обмена недоступен — показываем текст, чтобы выделить вручную.
+    $('#sheet').innerHTML = `<h2>Заметки</h2><p class="small mut">Выделите и скопируйте:</p>
+      <textarea class="field note-text" rows="10" readonly>${esc(text)}</textarea>`;
+    openSheetEl();
+  }
+}
+
+function downloadIcs() {
+  const url = location.origin + location.pathname;
+  const blob = new Blob([L.makeIcs(st, now(), url)], { type: 'text/calendar;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'uborka-napominaniya.ics';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Файл готов — откройте его, календарь добавит напоминания');
+}
+
+/* ---------- уборка одной комнаты ---------- */
+
+const ROOM_BUDGETS = [10, 20, 30];
+
+function openRoomSheet(z) {
+  const t = now();
+  const due = L.dueTasks(st, t).filter((x) => L.zoneOf(x.t, st) === z).length;
+  const opts = ROOM_BUDGETS.map((b) => {
+    let n = L.buildSession(st, t, b, L.DUE, z).filter((s) => s.kind === 'task').length;
+    let early = false;
+    if (!n) {
+      n = L.buildSession(st, t, b, 0, z).filter((s) => s.kind === 'task').length;
+      early = true;
+    }
+    return `<button class="budget" data-act="room-start" data-z="${z}" data-b="${b}" data-early="${early ? 1 : 0}" ${n ? '' : 'disabled'}>
+      <b>${b} мин</b><span>${n ? dela(n) + (early ? ' заранее' : '') : 'нечего'}</span></button>`;
+  }).join('');
+  $('#sheet').innerHTML = `<h2>${esc(zname(z))}</h2>
+    <div class="mut small">${due ? `Ждут заботы: ${dela(due)}` : 'Здесь уютно — можно освежить заранее'}</div>
+    <div class="sec-title">Сколько есть времени?</div>
+    <div class="budgets three">${opts}</div>
+    <button class="btn wide ghost" style="margin-top:14px" data-act="own-new" data-z="${z}">+ Своё дело в этой комнате</button>`;
+  openSheetEl();
+}
+
+/* ---------- свои дела ---------- */
+
+const OWN_FREQS = [1, 2, 3, 7, 14, 30, 90];
+const OWN_MINS = [2, 5, 10, 15, 30];
+let form = null;
+
+function openOwnForm(z, id) {
+  const c = id && L.task(st, id);
+  form = c
+    ? { id, z: c.z, t: c.t, every: c.every, min: c.min, soon: false }
+    : { id: null, z: z || 'kitchen', t: '', every: 7, min: 5, soon: false };
+  renderOwnForm();
+  setTimeout(() => $('#own-name')?.focus(), 50);
+}
+
+function renderOwnForm() {
+  const f = form;
+  const rooms = L.zonesShown(st);
+  const chip = (k, v, text) => `<button class="chip ${f[k] === v ? 'on' : ''}" data-act="own-set" data-k="${k}" data-v="${v}">${esc(text)}</button>`;
+  $('#sheet').innerHTML = `<h2>${f.id ? 'Изменить дело' : 'Своё дело'}</h2>
+    <input class="field" id="own-name" data-act="own-name" placeholder="Например: полить монстеру" value="${esc(f.t)}" maxlength="60">
+    <div class="sec-title">Где</div>
+    <div class="chips">${rooms.map((z) => chip('z', z.id, zname(z.id))).join('')}</div>
+    <div class="sec-title">Как часто</div>
+    <div class="chips">${OWN_FREQS.map((v) => chip('every', v, L.fmtEvery(v))).join('')}</div>
+    <div class="sec-title">Сколько времени</div>
+    <div class="chips">${OWN_MINS.map((v) => chip('min', v, v + ' мин')).join('')}</div>
+    ${f.id ? '' : `<div class="row" style="margin-top:14px"><div>Нужно уже сейчас<small>Попадёт в ближайшую уборку</small></div>${sw('own-soon', f.soon)}</div>`}
+    <div class="stack" style="margin-top:20px">
+      <button class="btn wide primary" data-act="own-save" ${f.t.trim() ? '' : 'disabled'}>${f.id ? 'Сохранить' : 'Добавить'}</button>
+      ${f.id ? '<button class="btn wide ghost" data-act="own-del">Удалить дело</button>' : ''}
+    </div>`;
+  openSheetEl();
+}
+
+function whenChips(t) {
+  if (L.effEvery(t, st) > 1) return '';
+  const w = L.whenOf(t, st);
+  return `<div class="sec-title">Когда удобнее</div>
+    <div class="chips">
+      <button class="chip ${w === 'morning' ? 'on' : ''}" data-act="when" data-id="${t.id}" data-v="morning">Утром</button>
+      <button class="chip ${w === 'evening' ? 'on' : ''}" data-act="when" data-id="${t.id}" data-v="evening">Вечером</button>
+    </div>`;
+}
+
+function openOwnSheet(t) {
+  $('#sheet').innerHTML = `<h2>${esc(t.t)}</h2>
+    <div class="mut small">Своё дело · ${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
+    ${whenChips(t)}
+    <div class="stack" style="margin-top:20px">
+      <button class="btn wide primary" data-act="done" data-id="${t.id}">Сделано сегодня</button>
+      <button class="btn wide" data-act="done-yday" data-id="${t.id}">Сделано вчера</button>
+      <button class="btn wide ghost" data-act="own-edit" data-id="${t.id}">Изменить или удалить</button>
+    </div>`;
+  openSheetEl();
+}
+
+function openSheetEl() {
+  $('#sheet').hidden = false;
+  $('#sheet-bg').hidden = false;
+}
+
+function closeSheet() {
+  $('#sheet').hidden = true;
+  $('#sheet-bg').hidden = true;
+}
+
+/* ---------- отметка выполнения ---------- */
+
+function markDone(id, at = now(), min) {
+  const t = L.task(st, id);
+  const prev = st.last[id];
+  L.complete(st, id, at, min ?? t.min);
+  commit();
+  buzz();
+  toast(`${pick(THANKS)} ${tname(t)}`, () => {
+    L.undoComplete(st, id, prev);
+    commit();
+    render();
+  });
+}
+
+const THANKS = ['Готово:', 'Сделано:', 'Одним делом меньше:', 'Дом благодарит:'];
+const AFTER = [
+  'Спасибо себе',
+  'Стало чуть светлее',
+  'Хорошо идёт',
+  'Минус одно дело',
+  'Спокойно, без спешки',
+  'Дому приятно',
+  'Вдох — и дальше',
+];
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+/* ---------- тихий фон ---------- */
+
+// Коричневый шум — как далёкий дождь. Генерируется на месте, без файлов.
+const ambient = {
+  ctx: null,
+  gain: null,
+  on: false,
+  start() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      this.ctx = this.ctx || new Ctx();
+      const ctx = this.ctx;
+      const len = ctx.sampleRate * 4;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) {
+        last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+        d[i] = last * 3.5;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 900;
+      this.gain = ctx.createGain();
+      this.gain.gain.setValueAtTime(0, ctx.currentTime);
+      this.gain.gain.linearRampToValueAtTime(0.35, ctx.currentTime + 2);
+      src.connect(lp).connect(this.gain).connect(ctx.destination);
+      src.start();
+      this.src = src;
+      this.on = true;
+    } catch {
+      this.on = false;
+    }
+  },
+  stop() {
+    if (!this.on || !this.ctx) return;
+    const g = this.gain;
+    const src = this.src;
+    g.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 1);
+    setTimeout(() => src.stop(), 1100);
+    this.on = false;
+  },
+  toggle() {
+    this.on ? this.stop() : this.start();
+  },
+};
+
+/* ---------- режим уборки ---------- */
+
+function startSession(budget, minUrg, zone) {
+  closeSheet();
+  const steps = L.buildSession(st, now(), budget, minUrg ?? L.DUE, zone || null);
+  if (!steps.length) return;
+  // Короткую уборку начинаем сразу: лишний экран перед стартом съедает решимость.
+  const quick = L.sessionMinutes(steps) <= 6;
+  st.session = { steps, idx: 0, prepAt: {}, stepStart: now(), done: 0, min: 0, started: now(), ready: quick, zones: [] };
+  if (quick) lockScreen(true);
+  commit();
+  renderSession();
+}
+
+async function lockScreen(on) {
+  try {
+    if (on && 'wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+    if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch {
+    /* экран может погаснуть — не критично */
+  }
+}
+
+function mmss(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function soundBtn() {
+  return `<button data-act="s-sound" class="sound ${ambient.on ? 'on' : ''}">${ambient.on ? '♪ фон включён' : '♪ тихий фон'}</button>`;
+}
+
+function renderSession() {
+  const ss = st.session;
+  const el = $('#session');
+  if (!ss) {
+    el.hidden = true;
+    clearInterval(tick);
+    return;
+  }
+  el.hidden = false;
+  const inner = (html) => (el.innerHTML = `<div class="inner">${html}</div>`);
+  const total = ss.steps.reduce((s, x) => s + x.min, 0);
+
+  // Перед началом: собрать корзинку.
+  if (!ss.ready) {
+    const kit = L.sessionKit(ss.steps, st);
+    const zones = [...new Set(ss.steps.map((s) => s.zone))].map(zname);
+    inner(`<div class="s-top"><button data-act="s-cancel" class="mut">✕ Не сейчас</button>${soundBtn()}</div>
+      <div class="s-body">
+        <div class="s-kind">~${total} мин · ${dela(ss.steps.filter((s) => s.kind === 'task').length)}</div>
+        <h1 class="s-text">Соберите корзинку</h1>
+        <p class="mut">${esc(zones.join(' → '))}</p>
+        ${kit.length ? `<ul class="kit">${kit.map((k) => `<li><button data-act="kit">${esc(k)}</button></li>`).join('')}</ul>` : '<p class="mut">Ничего особенного не понадобится.</p>'}
+        <p class="small dim">Можно включить музыку или тихий фон — и не торопиться.</p>
+      </div>
+      <div class="s-actions"><button class="btn primary" data-act="s-go">Начать</button></div>`);
+    return;
+  }
+
+  if (ss.idx >= ss.steps.length) {
+    clearInterval(tick);
+    const mins = Math.max(1, ss.min);
+    const touched = [...new Set(ss.zones)];
+    const zones = touched.map(zname);
+    const note = ss.ritual === 'morning' ? 'Утро началось с заботы. Хорошего дня.'
+      : ss.ritual === 'evening' ? 'Дом готов ко сну — и вы тоже.'
+      : ss.done >= 5 ? 'Теперь можно заварить чай и полюбоваться.' : 'Маленький шаг — тоже шаг. Дом это чувствует.';
+    inner(`<div class="s-body finish">
+      ${ss.done ? house(L.zonesShown(st), touched) : ''}
+      <h1>${ss.done ? 'Дом стал уютнее' : 'Хорошо, что заглянули'}</h1>
+      <p class="mut">${ss.done ? `${dela(ss.done)} за ${mins} мин${zones.length ? ' · ' + esc(zones.join(', ')) : ''}` : 'Вернётесь, когда будут силы — дом подождёт.'}</p>
+      ${ss.done ? `<p class="small mut">${note}</p>` : ''}
+      <button class="btn primary wide" data-act="s-close">Спасибо</button>
+    </div>`);
+    return;
+  }
+
+  const step = ss.steps[ss.idx];
+  const t = L.task(st, step.id);
+  // Долго не было (прогулка, звонок) — встречаем и начинаем шаг заново, а не показываем «45:08».
+  const away = now() - ss.stepStart > Math.max(15, step.min * 3) * 60000;
+  if (away) {
+    ss.stepStart = now();
+    cheer = 'С возвращением — продолжим';
+    commit();
+  }
+  const prepAt = ss.prepAt[step.id];
+  const waitLeft = step.kind === 'task' && t.wait && prepAt ? prepAt + t.wait * 60000 - now() : 0;
+  const hasLater = ss.idx < ss.steps.length - 1;
+  const prev = ss.steps[ss.idx - 1];
+  const moved = step.kind === 'task' && prev && prev.kind === 'task' && prev.zone !== step.zone;
+  const kit = step.kind === 'task' ? L.kitFor(t) : [];
+
+  inner(`
+    <div class="s-top"><button data-act="s-stop" class="mut">✕ Хватит на сегодня</button><span class="s-tools"><button class="note-btn" data-act="note" aria-label="Что неудобно">✎</button>${soundBtn()}</span></div>
+    <div class="s-prog">${ss.steps.map((_, i) => `<i class="${i < ss.idx ? 'done' : i === ss.idx ? 'cur' : ''}"></i>`).join('')}</div>
+    <div class="s-body">
+      ${cheer ? `<div class="cheer">${esc(cheer)}</div>` : ''}
+      <div class="s-kind ${step.kind}">${step.kind === 'prep' ? 'Сначала — пусть средство поработает' : (moved ? 'Переходим: ' : '') + esc(zname(step.zone))}</div>
+      <div class="s-text pop">${esc(step.text)}</div>
+      ${step.kind === 'task' && t.hint ? `<div class="s-hint">${esc(t.hint)}</div>` : ''}
+      ${step.kind === 'prep' ? `<div class="s-hint">Пока оно действует ${t.wait} мин, займёмся другим.</div>` : ''}
+      ${kit.length ? `<div class="s-hint small">Понадобится: ${esc(kit.join(', ').toLowerCase())}</div>` : ''}
+      ${t.warn ? `<div class="s-warn">${esc(t.warn)}</div>` : ''}
+      ${waitLeft > 0 ? `<div class="s-wait">Средство ещё действует: <b id="wait-left">${mmss(waitLeft)}</b>${hasLater ? ' — можно вернуться к этому позже.' : ''}</div>` : ''}
+      <div class="s-timer"><span id="s-timer">${mmss(now() - ss.stepStart)}</span> из ~${step.min} мин</div>
+    </div>
+    <div class="s-actions">
+      <button class="btn primary" data-act="s-done">${step.kind === 'prep' ? 'Нанесено' : 'Готово'}</button>
+      <button class="btn" data-act="s-later" ${hasLater ? '' : 'disabled'}>Позже</button>
+      <button class="btn ghost" data-act="s-skip">Пропустить</button>
+    </div>`);
+
+  clearInterval(tick);
+  tick = setInterval(() => {
+    const tm = $('#s-timer');
+    if (tm) tm.textContent = mmss(now() - ss.stepStart);
+    const wl = $('#wait-left');
+    if (wl) {
+      const rest = prepAt + t.wait * 60000 - now();
+      if (rest <= 0) renderSession();
+      else wl.textContent = mmss(rest);
+    }
+  }, 1000);
+}
+
+function sessionAct(act) {
+  const ss = st.session;
+  const step = ss.steps[ss.idx];
+  cheer = '';
+  if (act === 's-sound') {
+    ambient.toggle();
+    const b = $('.sound');
+    if (b) b.outerHTML = soundBtn();
+    return;
+  }
+  if (act === 's-go') {
+    ss.ready = true;
+    ss.stepStart = now();
+    lockScreen(true);
+  } else if (act === 's-cancel') {
+    st.session = null;
+    ambient.stop();
+    commit();
+    renderSession();
+    return render();
+  } else if (act === 's-done') {
+    if (step.kind === 'prep') {
+      ss.prepAt[step.id] = now();
+    } else {
+      const spent = (now() - ss.stepStart) / 60000;
+      const min = Math.max(1, Math.round(spent > step.min * 2 ? step.min : spent));
+      L.complete(st, step.id, now(), min);
+      ss.done++;
+      ss.min += min;
+      ss.zones.push(step.zone);
+      cheer = pick(AFTER);
+    }
+    buzz(30);
+    ss.idx++;
+  } else if (act === 's-later') {
+    ss.steps.push(ss.steps.splice(ss.idx, 1)[0]);
+  } else if (act === 's-skip') {
+    ss.idx++;
+  } else if (act === 's-stop') {
+    ss.steps = ss.steps.slice(0, ss.idx);
+  } else if (act === 's-close') {
+    st.session = null;
+    ambient.stop();
+    commit();
+    lockScreen(false);
+    renderSession();
+    render();
+    return;
+  }
+  ss.stepStart = now();
+  commit();
+  renderSession();
+}
+
+/* ---------- маршрутизация и события ---------- */
+
+function render() {
+  if (!st.setup) {
+    renderSetup();
+    return;
+  }
+  $('#setup').hidden = true;
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  if (tab === 'now') renderNow();
+  else if (tab === 'home') renderHome();
+  else renderSettings();
+}
+
+function goTab(name) {
+  tab = name;
+  render();
+  window.scrollTo(0, 0);
+}
+
+document.addEventListener('click', (e) => {
+  const tb = e.target.closest('#tabs button');
+  if (tb) return goTab(tb.dataset.tab);
+  if (e.target.id === 'sheet-bg') return closeSheet();
+
+  const el = e.target.closest('[data-act]');
+  if (!el || el.tagName === 'INPUT') return;
+  const { act, id } = el.dataset;
+
+  if (act.startsWith('s-')) return sessionAct(act);
+  switch (act) {
+    case 'kit':
+      return el.classList.toggle('got');
+    case 'room': {
+      const on = !roomOn(el.dataset.z);
+      L.setZone(st, el.dataset.z, on, now());
+      commit();
+      return renderSetup();
+    }
+    case 'setup-next':
+      setupStep++;
+      return renderSetup();
+    case 'setup-back':
+      setupStep--;
+      return renderSetup();
+    case 'ago':
+      L.startFrom(st, now(), Number(el.dataset.v));
+      commit();
+      tab = 'now';
+      render();
+      return toast('Добро пожаловать домой');
+    case 'setup-keep':
+      st.setup = true;
+      commit();
+      return render();
+    case 'setup-again':
+      st.setup = false;
+      setupStep = 0;
+      return render();
+    case 'room-sheet':
+      return openRoomSheet(el.dataset.z);
+    case 'room-start':
+      return startSession(Number(el.dataset.b), el.dataset.early === '1' ? 0 : L.DUE, el.dataset.z);
+    case 'own-new':
+      return openOwnForm(el.dataset.z);
+    case 'own-edit':
+      return openOwnForm(null, id);
+    case 'own-set':
+      form[el.dataset.k] = el.dataset.k === 'z' ? el.dataset.v : Number(el.dataset.v);
+      return renderOwnForm();
+    case 'own-save': {
+      if (!form.t.trim()) return;
+      const data = { z: form.z, t: form.t, every: form.every, min: form.min, soon: form.soon };
+      if (form.id) L.editCustom(st, form.id, data);
+      else L.addCustom(st, now(), data);
+      commit();
+      closeSheet();
+      openZones.add(form.z);
+      toast(form.id ? 'Сохранено' : 'Дело добавлено');
+      return render();
+    }
+    case 'own-del':
+      L.removeCustom(st, form.id);
+      commit();
+      closeSheet();
+      toast('Дело удалено');
+      return render();
+    case 'ritual-switch':
+      ritualView = el.dataset.w === L.currentRitual(now()) ? null : el.dataset.w;
+      return render();
+    case 'ritual':
+      return startRitual(el.dataset.w);
+    case 'when':
+      st.when[id] = el.dataset.v;
+      commit();
+      openSheet(id);
+      return render();
+    case 'rt-ics':
+      return downloadIcs();
+    case 'note':
+      return openNoteSheet();
+    case 'note-save': {
+      const txt = $('#note-text').value;
+      if (!L.addNote(st, now(), txt, noteCtx)) return;
+      commit();
+      closeSheet();
+      toast('Записано — поработаем над этим');
+      return tab === 'settings' ? render() : undefined;
+    }
+    case 'note-done': {
+      const n = st.notes.find((x) => x.id === id);
+      n.done = !n.done;
+      commit();
+      return render();
+    }
+    case 'note-del':
+      st.notes = st.notes.filter((x) => x.id !== id);
+      commit();
+      return render();
+    case 'notes-copy':
+      return copyNotes();
+    case 'tab':
+      return goTab(el.dataset.tab);
+    case 'go-zone':
+      openZones.add(el.dataset.z);
+      goTab('home');
+      return document.getElementById('zone-' + el.dataset.z)?.scrollIntoView({ block: 'start' });
+    case 'start':
+      return startSession(Number(el.dataset.b));
+    case 'start-ahead':
+      return startSession(15, 0);
+    case 'task':
+      return openSheet(id);
+    case 'done':
+      closeSheet();
+      el.classList.add('done');
+      markDone(id);
+      return setTimeout(render, 250);
+    case 'undo-today': {
+      // Повторное нажатие на отмеченную сегодня мелочь — снять отметку.
+      const i = st.log.map((x) => x.id).lastIndexOf(id);
+      const prevAt = [...st.log.slice(0, i)].reverse().find((x) => x.id === id)?.at;
+      L.undoComplete(st, id, prevAt);
+      commit();
+      return render();
+    }
+    case 'done-yday':
+      closeSheet();
+      markDone(id, now() - L.DAY);
+      return render();
+    case 'task-off':
+      st.taskOff[id] = true;
+      commit();
+      closeSheet();
+      toast('Убрано из списка — вернуть можно в настройках');
+      return render();
+    case 'task-on':
+      delete st.taskOff[id];
+      commit();
+      return render();
+    case 'freq': {
+      const v = Number(el.dataset.v);
+      if (v) st.every[id] = v;
+      else delete st.every[id];
+      commit();
+      openSheet(id);
+      return render();
+    }
+    case 'pause-off':
+      L.endPause(st, now());
+      commit();
+      return render();
+    case 'export':
+      return S.exportFile(st);
+    case 'undo':
+      if (toast.undo) toast.undo();
+      $('#toast').hidden = true;
+      return;
+  }
+});
+
+document.addEventListener('change', (e) => {
+  const el = e.target;
+  const act = el.dataset.act;
+  if (act === 'own-soon') {
+    form.soon = el.checked;
+    return;
+  }
+  if (act === 'rt-on') st.remind[el.dataset.k].on = el.checked;
+  else if (act === 'rt-time') st.remind[el.dataset.k].time = el.value || st.remind[el.dataset.k].time;
+  else if (act === 'rt-day') st.remind.weekly.day = Number(el.value);
+  else if (act === 'hh') st.household[el.dataset.k] = el.checked;
+  else if (act === 'pet') {
+    st.household[el.dataset.k] = el.checked;
+    if (el.checked) L.seedMissing(st, now(), (t) => !!t.need || t.z === 'pets');
+  } else if (act === 'petname') st.household[el.dataset.k] = el.value.trim();
+  else if (act === 'merged') st.merged = el.checked;
+  else if (act === 'zone') L.setZone(st, el.dataset.z, el.checked, now());
+  else if (act === 'pause') (el.checked ? L.startPause : L.endPause)(st, now());
+  else if (act === 'import' && el.files[0]) {
+    S.importFile(el.files[0], now())
+      .then((data) => {
+        st = data;
+        commit();
+        toast('Копия загружена');
+        render();
+      })
+      .catch((err) => toast(err.message || 'Не удалось прочитать файл'));
+    return;
+  } else return;
+  commit();
+  if (act === 'petname') return; // не перерисовывать, чтобы не терять фокус
+  render();
+});
+
+// Имя питомца сохраняем по мере ввода, без перерисовки.
+document.addEventListener('input', (e) => {
+  if (e.target.dataset.act === 'search') {
+    query = e.target.value;
+    $('#zones').innerHTML = zonesHtml();
+    return;
+  }
+  if (e.target.dataset.act === 'own-name') {
+    form.t = e.target.value;
+    const b = document.querySelector('[data-act="own-save"]');
+    if (b) b.disabled = !form.t.trim();
+    return;
+  }
+  if (e.target.dataset.act !== 'petname') return;
+  st.household[e.target.dataset.k] = e.target.value.trim();
+  commit();
+});
+
+// Запоминаем раскрытые зоны, чтобы после отметки список не схлопывался.
+document.addEventListener(
+  'toggle',
+  (e) => {
+    const z = e.target.dataset && e.target.dataset.zone;
+    if (!z) return;
+    if (e.target.open) openZones.add(z);
+    else openZones.delete(z);
+  },
+  true,
+);
+
+// Вернулись в приложение (например, утром) — пересчитать сроки.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (st.session) {
+    if (st.session.ready) lockScreen(true);
+    renderSession();
+  } else render();
+});
+
+render();
+if (st.session) renderSession();
+S.askPersist();
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // Пришла новая версия — перезагрузиться один раз, чтобы не показывать старую.
+  // Только если страницей уже управляла прежняя версия (при первой установке — не нужно).
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
