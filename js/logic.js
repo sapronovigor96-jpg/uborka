@@ -156,9 +156,18 @@ export function freshness(t, st, now) {
   return Math.max(0, Math.min(1, 1.5 - urgency(t, st, now)));
 }
 
+// Частые дела весят больше: беспорядок от них виден сразу, а от ежегодных — нет.
+// Вес 1/√частоты: ежедневное — 1, недельное — 0,38, месячное — 0,18.
 function avgFresh(ts, st, now) {
   if (!ts.length) return 1;
-  return ts.reduce((s, t) => s + freshness(t, st, now), 0) / ts.length;
+  let sum = 0;
+  let weights = 0;
+  for (const t of ts) {
+    const w = 1 / Math.sqrt(effEvery(t, st));
+    sum += w * freshness(t, st, now);
+    weights += w;
+  }
+  return sum / weights;
 }
 
 // Чистота комнаты 0…1 — средняя свежесть её дел.

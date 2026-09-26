@@ -14,6 +14,8 @@ let tick = null;
 let wakeLock = null;
 let setupStep = 0;
 let ritualView = null; // какой ритуал показан: null — по времени суток
+let ritualOpen = false; // развернуть уже сделанный ритуал
+let restMore = false; // вечер сделан, но хочется ещё — показать выбор времени
 const RITUAL = { morning: 'Утренние мелочи', evening: 'Вечерние мелочи' };
 let cheer = ''; // похвала после шага — только в памяти, чтобы не повторялась после перезагрузки
 const LIT = 0.7; // с какой чистоты окно комнаты горит в полную силу
@@ -56,7 +58,7 @@ function house(zones, glowZones = []) {
       const h = L.zoneHealth(st, z.id, t);
       const x = x0 + (i % cols) * (W + GX);
       const y = top + 15 + Math.floor(i / cols) * (H + GY);
-      const glow = h >= LIT ? 1 : h >= 0.4 ? 0.45 : 0.12;
+      const glow = Math.min(1, 0.1 + 0.9 * Math.pow(h / LIT, 1.3));
       return `<g class="win ${glowZones.includes(z.id) ? 'fresh' : ''}" data-act="go-zone" data-z="${z.id}">
         <title>${esc(zname(z.id))}</title>
         <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="3" class="win-dark"/>
@@ -253,17 +255,28 @@ function renderNow() {
   const back = lastAct !== null && t - lastAct >= AWAY_DAYS * L.DAY && st.pause === null;
   const title = back
     ? 'С возвращением'
+    : new Date(t).getHours() >= 18 && L.ritual(st, 'evening').length > 0 && L.ritualSteps(st, 'evening', t).length === 0
+      ? 'На сегодня хватит'
     : h >= 0.85 ? 'Дома уютно' : h >= 0.65 ? 'Дому нужно чуть-чуть заботы' : h >= 0.45 ? 'Дом соскучился по вам' : 'Зажжём одно окошко?';
   const small = L.buildSession(st, t, 5).filter((x) => x.kind === 'task').length;
-  const buddyLine = back
+  const hour = new Date(t).getHours();
+  const eveningDone = hour >= 18 && L.ritual(st, 'evening').length > 0 && L.ritualSteps(st, 'evening', t).length === 0;
+  const morningDone = hour < 14 && L.ritual(st, 'morning').length > 0 && L.ritualSteps(st, 'morning', t).length === 0;
+  const few = (n) => (n <= 3 ? 'Пара мелочей' : 'Несколько мелочей');
+  const buddyLine = eveningDone
+    ? ['Вечер сделан. Отдыхайте — я присмотрю.', 'happy']
+    : back
     ? ['Я тут всё сторожил. Начнём с малого?', 'calm']
-    : ritualNowFor(t, rLeft) === 'morning' ? ['Доброе утро! Пара мелочей — и день пойдёт легче.', 'happy']
-    : ritualNowFor(t, rLeft) === 'evening' ? ['Вечер. Пара мелочей — и можно отдыхать.', 'calm']
+    : ritualNowFor(t, rLeft) === 'morning' ? [`Доброе утро! ${few(rLeft.length)} — и день пойдёт легче.`, 'happy']
+    : ritualNowFor(t, rLeft) === 'evening' ? [`Вечер. ${few(rLeft.length)} — и можно отдыхать. Начнём с первой.`, 'calm']
+    : morningDone ? ['Утро сделано — хорошее начало дня.', 'happy']
     : h >= 0.85 ? ['Как хорошо у нас. Можно просто отдохнуть.', 'happy']
     : ['Одно маленькое дело — и в доме станет светлее.', 'calm'];
   // Главная кнопка: сначала ежедневный ритуал этого времени суток, если он не сделан.
   const ritualNow = !ritualView && rLeft.length ? L.currentRitual(t) : null;
-  const mainBtn = ritualNow
+  const mainBtn = eveningDone
+    ? (restMore ? '' : `<button class="btn ghost wide" style="margin-top:14px" data-act="rest-more">Если хочется ещё</button>`)
+    : ritualNow
     ? `<button class="btn primary wide start-small" data-act="ritual" data-w="${ritualNow}">${RITUAL[ritualNow]}<small>${dela(rLeft.length)} · по шагам</small></button>`
     : small
       ? `<button class="btn primary wide start-small" data-act="start" data-b="5">Начать с малого<small>5 минут · ${dela(small)}</small></button>`
@@ -288,7 +301,8 @@ function renderNow() {
     ${say(...buddyLine)}
     ${mainBtn}
 
-    <div class="sec-title">${ritualNow ? 'Или уборка на время' : 'Есть больше времени?'}</div>
+    ${eveningDone && !restMore ? '' : `
+    <div class="sec-title">${ritualNow ? 'Или уборка на время' : eveningDone ? 'Сколько есть времени?' : 'Есть больше времени?'}</div>
     <div class="budgets three">${budgets}</div>
     ${L.buildSession(st, t, 60).length === 0 ? `<button class="btn wide ghost" style="margin-top:10px" data-act="start-ahead">Сделать что-нибудь заранее · 15 мин</button>` : ''}
     <div class="rooms-pick"><span class="mut small">Или одна комната:</span>
@@ -298,22 +312,23 @@ function renderNow() {
           const n = L.dueTasks(st, t).filter((x) => L.zoneOf(x.t, st) === z.id).length;
           return `<button class="chip" data-act="room-sheet" data-z="${z.id}">${esc(zname(z.id))}${n ? '<i class="chip-dot"></i>' : ''}</button>`;
         })
-        .join('')}</div></div>
+        .join('')}</div></div>`}
 
     ${rList.length || oList.length ? `<div class="sec-title">${RITUAL[which]} <span class="count">${rDone} из ${rList.length}</span></div>
     <div class="card">
     ${rLeft.length && !ritualNow ? `<button class="btn wide ritual-go" data-act="ritual" data-w="${which}">Пройти по шагам · ${dela(rLeft.length)}</button>` : ''}
-    ${rList.length && !rLeft.length ? `<p class="small ok-note">${which === 'morning' ? 'Утро сделано — хорошего дня.' : 'Вечер сделан — можно отдыхать.'}</p>` : ''}
-    <ul class="tl daily">${rList
+    ${rList.length && !rLeft.length ? `<button class="ok-note ritual-done" data-act="ritual-open">✓ ${which === 'morning' ? 'Утро сделано' : 'Вечер сделан'} · ${rDone} из ${rList.length} <span class="dim">${ritualOpen ? 'свернуть' : 'показать'}</span></button>` : ''}
+    <ul class="tl daily" ${rList.length && !rLeft.length && !ritualOpen ? 'hidden' : ''}>${rList
       .map((x) => {
         const done = doneToday(x.id);
         return `<li class="${done ? 'is-done' : ''}"><button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${x.id}" aria-label="Сделано">✓</button>
           <button class="tt" data-act="task" data-id="${x.id}">${esc(tname(x))}<small>${esc(zname(L.zoneOf(x, st)))} · ${x.min} мин</small></button></li>`;
       })
       .join('')}</ul>
-      ${oList.length ? `<button class="more" data-act="ritual-switch" data-w="${other}">${RITUAL[other]}: ${oDone} из ${oList.length} →</button>` : ''}</div>` : ''}
+      ${oList.length ? `<button class="more" data-act="ritual-switch" data-w="${other}">${eveningDone && other === 'morning' ? 'Утренние мелочи — завтра →' : `${RITUAL[other]}: ${oDone} из ${oList.length} →`}</button>` : ''}</div>` : ''}
 
-    ${due.length ? `<div class="sec-title">Ждут заботы</div>
+    ${eveningDone && due.length ? '<p class="small mut rest-note">Остальное подождёт до завтра.</p>' : ''}
+    ${due.length && !eveningDone ? `<div class="sec-title">Ждут заботы</div>
     <div class="card"><ul class="tl">${due.slice(0, 5).map((x) => taskRow(x.t, true)).join('')}</ul>
     ${due.length > 5 ? `<button class="more" data-act="tab" data-tab="home">Остальное — в комнатах, оно подождёт</button>` : ''}</div>` : ''}
 
@@ -864,7 +879,7 @@ function renderSession() {
 
   inner(`${top}
     <div class="s-body">
-      ${cheer ? `<div class="cheer">${say(cheer, 'happy')}</div>` : ''}
+      <div class="cheer-slot">${cheer ? `<div class="cheer">${say(cheer, 'happy')}</div>` : ''}</div>
       <div class="s-kind ${step.kind}">${step.kind === 'prep' ? 'Сначала — пусть средство поработает' : (moved ? 'Переходим: ' : '') + esc(zname(step.zone))}</div>
       <div class="s-text pop">${esc(step.text)}</div>
       ${w ? `<div class="s-why"><b>Даст:</b> ${esc(w[0])}</div>` : ''}
@@ -1092,6 +1107,12 @@ document.addEventListener('click', (e) => {
       commit();
       closeSheet();
       toast('Дело удалено');
+      return render();
+    case 'rest-more':
+      restMore = true;
+      return render();
+    case 'ritual-open':
+      ritualOpen = !ritualOpen;
       return render();
     case 'ritual-switch':
       ritualView = el.dataset.w === L.currentRitual(now()) ? null : el.dataset.w;

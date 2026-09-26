@@ -6,7 +6,7 @@
   --line: #3b3229;
   --txt: #f2e8d9;
   --mut: #ab9c8b;
-  --dim: #786b5c;
+  --dim: #8c7f70; /* контраст ~4.5:1 на фоне — мелкий текст читается */
   --acc: #eab87f;
   --acc-ink: #2a1f14;
   --acc-soft: rgba(234, 184, 127, .13);
@@ -135,6 +135,8 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .field.time { width: auto; margin: 0; padding: 8px 10px; flex: none; color-scheme: dark; }
 .ritual-go { margin-bottom: 6px; }
 .ok-note { color: var(--ok); margin: 0 0 6px; }
+.ritual-done { display: flex; width: 100%; justify-content: space-between; padding: 4px 0; font-size: 15px; }
+.ritual-done .dim { font-size: 13px; }
 .start-small {flex-direction: column; gap: 0; min-height: 68px; margin-top: 18px; font-size: 19px; }
 .start-small small { font-size: 13px; font-weight: 500; opacity: .75; }
 .search { margin: 14px 0 16px; }
@@ -295,10 +297,11 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .bubble b { display: block; font-size: 12px; color: var(--acc); font-weight: 600; }
 .finish .buddy { justify-content: center; margin: 4px 0 10px; }
 .cheer .buddy { margin: 0 0 4px; }
+.cheer-slot { min-height: 58px; display: flex; align-items: flex-end; }
 .cheer .mascot { width: 44px; height: 44px; }
 
 /* Режим уборки: навигация, пауза, польза */
-.icon-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); color: var(--mut); font-size: 18px; display: grid; place-items: center; }
+.icon-btn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); color: var(--mut); font-size: 18px; display: grid; place-items: center; }
 .icon-btn:disabled { opacity: .3; }
 .icon-btn.on { color: var(--acc); border-color: var(--acc); background: var(--acc-soft); }
 button.s-prog { width: 100%; padding: 8px 0; }
