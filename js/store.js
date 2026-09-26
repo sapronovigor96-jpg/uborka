@@ -202,9 +202,9 @@ export async function connect(st, now, onChange, onStatus = () => {}) {
     });
     const ok = await remote.ready();
     remoteStatus = remote.status();
-    if (!ok && remoteStatus.wrongKey) return 'wrong_key';
+    if (!ok && remoteStatus.wrongKey) return remote.stop(), 'wrong_key';
     // Без сети, но копия дома уже есть — работаем с ней; без копии подключиться нельзя.
-    if (!ok && !(await remote.doc('home/state').get()).exists) return 'offline';
+    if (!ok && !(await remote.doc('home/state').get()).exists) return remote.stop(), 'offline';
     db = remote;
     me = cfg.name || null;
   }
@@ -279,6 +279,7 @@ export function syncNow() {
 
 // Отключить телефон от общего дома: дальше он живёт сам по себе с последней копией.
 export function disconnect() {
+  if (db && db.stop) db.stop();
   setPairing(null);
   db = null;
   shared = false;

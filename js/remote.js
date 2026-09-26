@@ -50,6 +50,7 @@ export function makeHttpDb(url, key, onStatus = () => {}) {
   const status = { online: false, wrongKey: false, lastSync: 0, pending: outbox.length, error: '' };
   let flushing = false;
   let timer = null;
+  let stopped = false;
 
   const persist = () => {
     writeLS(CACHE_KEY, { since, docs: Object.fromEntries(cache), url });
@@ -107,7 +108,7 @@ export function makeHttpDb(url, key, onStatus = () => {}) {
   }
 
   async function flush() {
-    if (flushing || status.wrongKey) return;
+    if (stopped || flushing || status.wrongKey) return;
     flushing = true;
     try {
       while (outbox.length) {
@@ -131,6 +132,7 @@ export function makeHttpDb(url, key, onStatus = () => {}) {
   }
 
   async function pull() {
+    if (stopped) return false;
     try {
       const res = await call('GET', '/docs?since=' + Math.max(0, since - OVERLAP_MS));
       const changed = [];
@@ -159,6 +161,7 @@ export function makeHttpDb(url, key, onStatus = () => {}) {
 
   function schedule(ms = POLL_MS) {
     clearTimeout(timer);
+    if (stopped) return;
     timer = setTimeout(async () => {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') {
         await flush();
@@ -206,9 +209,11 @@ export function makeHttpDb(url, key, onStatus = () => {}) {
     },
   });
 
+  const wake = () => !stopped && flush().then(pull);
+  const onVisible = () => document.visibilityState === 'visible' && wake();
   if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && flush().then(pull));
-    window.addEventListener('online', () => flush().then(pull));
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', wake);
   }
 
   return {
@@ -224,6 +229,15 @@ export function makeHttpDb(url, key, onStatus = () => {}) {
     syncNow: async () => {
       await flush();
       return pull();
+    },
+    // Остановить: без опросов и отправки (телефон отключили или ключ не подошёл).
+    stop() {
+      stopped = true;
+      clearTimeout(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('online', wake);
+      }
     },
     doc: docRef,
     collection: colRef,
