@@ -9,6 +9,7 @@
 //   log/<ГГГГ-ММ>   — { ключ записи: запись } — журнал по месяцам, записи отдельными полями
 // Удалённое поле записывается как null.
 import { normalize } from './logic.js';
+import { makeHttpDb } from './remote.js';
 
 const KEY = 'uborka.v1';
 const SHARED = ['v', 'created', 'zonesOn', 'taskOff', 'every', 'household', 'merged', 'custom', 'when', 'remind', 'buddy', 'setup', 'pause', 'notes'];
@@ -16,7 +17,32 @@ const LOG_MONTHS = 3; // сколько месяцев журнала держа
 
 export let persistent = true;
 export let shared = false; // подключена общая база
-export let me = null; // id того, кто смотрит (для отметки «кто сделал»)
+export let me = null; // кто смотрит (для отметки «кто сделал»): id в Claude, имя на телефоне
+export let remoteStatus = null; // состояние связи с сервером дома (только телефонная версия)
+
+// Сервер общего дома (телефонная версия). Ключ вводится в Настройках и хранится только на телефоне.
+export const HOME_SERVER = 'https://uborka.sapronov-home.workers.dev';
+const PAIR_KEY = 'uborka.pair';
+
+export function pairing() {
+  try {
+    return JSON.parse(localStorage.getItem(PAIR_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+export function setPairing(cfg) {
+  try {
+    if (cfg) localStorage.setItem(PAIR_KEY, JSON.stringify(cfg));
+    else {
+      localStorage.removeItem(PAIR_KEY);
+      localStorage.removeItem('uborka.remote.cache');
+      localStorage.removeItem('uborka.remote.outbox');
+    }
+  } catch {
+    /* без localStorage подключение не сохранится */
+  }
+}
 
 const inClaude = () => typeof window !== 'undefined' && !!(window.claude && window.claude.use);
 export const inArtifact = inClaude();
@@ -102,7 +128,9 @@ function merge(path, patch, done) {
 }
 
 // Создать пустые документы заранее, чтобы первые отметки двух жильцов не столкнулись.
+// (Сервер дома сам создаёт документ при слиянии — там это не нужно.)
 async function ensure(path) {
+  if (db.upserts) return;
   const ref = db.doc(path);
   if (!(await ref.get()).exists) await queue(path, () => ref.set({}));
 }
@@ -150,19 +178,35 @@ function sync(st) {
 }
 
 // Подключиться к общей базе. st меняется на месте; onChange вызывается, когда пришли чужие изменения.
-export async function connect(st, now, onChange) {
-  if (!inClaude()) return false;
-  try {
-    db = await window.claude.use('db');
-  } catch {
-    db = null;
-  }
-  if (!db) return false;
-  try {
-    const user = await window.claude.use('user');
-    me = user ? await user.id() : null;
-  } catch {
-    me = null;
+// Возвращает true — подключено; false — общей базы нет; 'wrong_key' / 'offline' — телефон не смог подключиться.
+export async function connect(st, now, onChange, onStatus = () => {}) {
+  if (inClaude()) {
+    try {
+      db = await window.claude.use('db');
+    } catch {
+      db = null;
+    }
+    if (!db) return false;
+    try {
+      const user = await window.claude.use('user');
+      me = user ? await user.id() : null;
+    } catch {
+      me = null;
+    }
+  } else {
+    const cfg = pairing();
+    if (!cfg) return false;
+    const remote = makeHttpDb(cfg.url || HOME_SERVER, cfg.key, (s) => {
+      remoteStatus = s;
+      onStatus(s);
+    });
+    const ok = await remote.ready();
+    remoteStatus = remote.status();
+    if (!ok && remoteStatus.wrongKey) return 'wrong_key';
+    // Без сети, но копия дома уже есть — работаем с ней; без копии подключиться нельзя.
+    if (!ok && !(await remote.doc('home/state').get()).exists) return 'offline';
+    db = remote;
+    me = cfg.name || null;
   }
 
   await Promise.all(['home/last', ...recentMonths(now).slice(0, 1).map((m) => 'log/' + m)].map(ensure));
@@ -227,6 +271,18 @@ function apply(st, what, data) {
 
 export function database() {
   return db;
+}
+
+export function syncNow() {
+  return db && db.syncNow ? db.syncNow() : Promise.resolve(false);
+}
+
+// Отключить телефон от общего дома: дальше он живёт сам по себе с последней копией.
+export function disconnect() {
+  setPairing(null);
+  db = null;
+  shared = false;
+  remoteStatus = null;
 }
 
 /* ---------- файлы ---------- */

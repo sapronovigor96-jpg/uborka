@@ -197,7 +197,8 @@ function renderSetup() {
       <div class="chips big">${ROOMS.filter(([id]) => !(st.merged && id === 'living'))
         .map(([id, n]) => `<button class="chip ${roomOn(id) ? 'on' : ''}" data-act="room" data-z="${id}">${id === 'kitchen' && st.merged ? 'Кухня-гостиная' : n}</button>`)
         .join('')}</div>
-      <div class="card" style="margin-top:18px"><div class="row"><div>Кухня и гостиная — одна комната<small>Будут одним окном в домике</small></div>${sw('merged', st.merged)}</div></div>`,
+      <div class="card" style="margin-top:18px"><div class="row"><div>Кухня и гостиная — одна комната<small>Будут одним окном в домике</small></div>${sw('merged', st.merged)}</div></div>
+      ${S.inArtifact ? '' : '<button class="btn wide ghost" style="margin-top:14px" data-act="pair-open">У нас уже есть общий дом — подключиться</button>'}`,
     () => `<div class="s-kind">Знакомство · 2 из 3</div>
       <h1>Кто живёт с вами?</h1>
       <p class="mut">От этого зависит, как часто нужен пол, стирка и что ещё добавить.</p>
@@ -460,6 +461,8 @@ function renderSettings() {
       <p class="small dim" style="margin-bottom:0">Откроется файл — календарь предложит добавить события. Поменяли время — нажмите ещё раз и удалите старые события «Уборка».</p>
     </div>
 
+    ${S.inArtifact ? '' : homeSection()}
+
     <div class="sec-title">Кто живёт дома</div>
     <div class="card">${petFields()}
       <div class="row"><div>Дети<small>Пол — в 2 раза чаще</small></div>${sw('hh', h.kids, 'data-k="kids"')}</div>
@@ -494,7 +497,7 @@ function renderSettings() {
       <button class="btn wide ghost confirm" data-act="reset-marks">${armed === 'reset-marks' ? 'Точно сбросить? Нажмите ещё раз' : 'Сбросить отметки'}</button>
     </div>
     <button class="btn wide ghost" style="margin-top:16px" data-act="setup-again">Пройти знакомство заново</button>
-    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.8</p>`;
+    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.9</p>`;
 }
 
 /* ---------- лист задачи ---------- */
@@ -578,6 +581,7 @@ async function startChat() {
 }
 
 async function loadNames() {
+  if (!S.inArtifact) return; // на телефоне в сообщении уже записано имя
   const ids = [...new Set(chat.msgs.map((m) => m.by).filter((id) => id && !(id in chat.names)))];
   if (!ids.length) return;
   try {
@@ -591,6 +595,11 @@ async function loadNames() {
 }
 
 async function refreshCan() {
+  if (!S.inArtifact) {
+    chat.can = 'home';
+    if (chat.open) renderChat();
+    return;
+  }
   try {
     const c = await window.claude.use('comments');
     chat.can = c ? await c.canSendToClaude() : 'off';
@@ -601,6 +610,7 @@ async function refreshCan() {
 }
 
 const CAN_TEXT = {
+  home: 'Сообщение увидят Claude и все в доме. Ответ придёт сюда.',
   available: 'Claude на связи — ответит прямо здесь.',
   no_session: 'Claude сейчас не на связи. Сообщение сохранится, он прочитает его, как только вернётся.',
   writers_only: 'Отправлять Claude может тот, у кого есть права редактора. Сообщение сохранится в общей переписке.',
@@ -609,7 +619,7 @@ const CAN_TEXT = {
 const STATUS_TEXT = { sent: 'отправлено', saved: 'сохранено — Claude прочитает позже', answered: 'Claude ответил', consent: 'не отправлено: нужно разрешение' };
 
 function renderChat() {
-  const who = (m) => (m.role === 'claude' ? 'Claude' : m.by && m.by === S.me ? 'Вы' : chat.names[m.by] || 'Жилец');
+  const who = (m) => (m.role === 'claude' ? 'Claude' : m.by && m.by === S.me ? 'Вы' : (S.inArtifact ? chat.names[m.by] : m.by) || 'Жилец');
   const time = (ts) => new Date(ts).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const list = chat.msgs.length
     ? chat.msgs
@@ -652,7 +662,7 @@ async function sendChat() {
   renderChat();
   // Отправка Claude — сразу по нажатию: платформа принимает её только от свежего действия человека.
   try {
-    const c = await window.claude.use('comments');
+    const c = S.inArtifact ? await window.claude.use('comments') : null;
     if (c && chat.can === 'available') {
       let res;
       try {
@@ -747,6 +757,71 @@ function icsFromHash() {
     <div class="s-actions"><button class="btn primary" id="ics-go">Скачать напоминания</button></div></div>`;
   $('#ics-go').onclick = () => S.saveFile('uborka-napominaniya.ics', L.makeIcsFromEvents(events, now(), GITHUB_APP), 'text/calendar;charset=utf-8');
   return true;
+}
+
+/* ---------- общий дом (телефонная версия) ---------- */
+
+function syncText(r) {
+  if (!r) return 'Подключаюсь…';
+  if (r.wrongKey) return 'Ключ не подходит. Проверьте его и подключитесь заново.';
+  const ago = r.lastSync ? Math.round((Date.now() - r.lastSync) / 60000) : null;
+  const when = ago === null ? '' : ago < 1 ? 'только что' : `${ago} мин назад`;
+  if (!r.online) return `Нет связи с общим домом — изменения отправятся позже${r.pending ? ` (в очереди: ${r.pending})` : ''}.`;
+  return `Синхронизировано ${when}${r.pending ? ` · отправляется: ${r.pending}` : ''}.`;
+}
+
+function homeSection() {
+  const cfg = S.pairing();
+  if (cfg && S.shared)
+    return `<div class="sec-title">Общий дом</div>
+    <div class="card stack">
+      <div class="row"><div>Подключено<small>Вы здесь — ${esc(cfg.name || 'без имени')}</small></div><span class="chip-ok">●</span></div>
+      <p class="small mut" style="margin:0" id="sync-line">${esc(syncText(S.remoteStatus))}</p>
+      <button class="btn wide" data-act="sync-now">Синхронизировать сейчас</button>
+      <button class="btn wide ghost confirm" data-act="unpair">${armed === 'unpair' ? 'Точно отключить этот телефон? Нажмите ещё раз' : 'Отключить этот телефон'}</button>
+    </div>`;
+  return `<div class="sec-title">Общий дом</div>
+    <div class="card stack">
+      <p class="small mut" style="margin:0">Отметки, дела и переписка с Claude станут общими для всех, у кого есть ключ дома, — например, для вас и Маши.</p>
+      <button class="btn wide primary" data-act="pair-open">Подключиться к общему дому</button>
+    </div>`;
+}
+
+function openPairSheet() {
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>Общий дом</h2>
+    <p class="small mut">Вставьте ключ дома — его вам даст тот, кто настроил общий дом.</p>
+    <input class="field" id="pair-key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Ключ дома: xxxxx-xxxxx-xxxxx-xxxxx">
+    <input class="field" id="pair-name" maxlength="20" placeholder="Как вас зовут? Например, Маша">
+    <p class="small dim">Если в общем доме уже есть данные, они заменят данные на этом телефоне. Если общий дом пустой — туда попадёт этот телефон.</p>
+    <button class="btn wide primary" data-act="pair-go">Подключиться</button>`;
+  openSheetEl();
+}
+
+async function pairGo() {
+  const key = ($('#pair-key').value || '').trim().toLowerCase();
+  const name = ($('#pair-name').value || '').trim();
+  if (!key || !name) return toast('Нужны ключ и имя');
+  S.setPairing({ url: S.HOME_SERVER, key, name });
+  toast('Подключаюсь…');
+  const res = await S.connect(st, now(), onRemote, onRemoteStatus);
+  if (res === true) {
+    closeSheet();
+    startChat();
+    render();
+    return toast('Готово — теперь дом общий');
+  }
+  S.disconnect();
+  toast(res === 'wrong_key' ? 'Ключ не подошёл — проверьте его' : 'Нет связи с общим домом — попробуйте позже');
+}
+
+function onRemote() {
+  if (!st.session || $('#session').hidden) render();
+}
+
+function onRemoteStatus(r) {
+  const line = $('#sync-line');
+  if (line) line.textContent = syncText(r);
 }
 
 /* ---------- уборка одной комнаты ---------- */
@@ -1322,6 +1397,18 @@ document.addEventListener('click', (e) => {
       return render();
     case 'rt-ics':
       return downloadIcs();
+    case 'pair-open':
+      return openPairSheet();
+    case 'pair-go':
+      return pairGo();
+    case 'sync-now':
+      toast('Синхронизирую…');
+      return S.syncNow().then((ok) => (render(), toast(ok ? 'Синхронизировано' : 'Нет связи — попробуйте позже')));
+    case 'unpair':
+      if (!arm('unpair')) return render();
+      S.disconnect();
+      toast('Телефон отключён от общего дома');
+      return setTimeout(() => location.reload(), 800);
     case 'chat-send':
       return sendChat();
     case 'note':
@@ -1504,13 +1591,11 @@ if (!icsFromHash()) {
 S.askPersist();
 
 // Внутри Claude: подключаем общую базу и чат. Чужие отметки приходят сами и перерисовывают экран.
-S.connect(st, now(), () => {
-  if (!st.session || $('#session').hidden) render();
-}).then((ok) => {
-  if (ok) {
+S.connect(st, now(), onRemote, onRemoteStatus).then((ok) => {
+  if (ok === true) {
     startChat();
     render();
-  }
+  } else if (ok === 'wrong_key') toast('Ключ общего дома не подходит — проверьте в Настройках');
 });
 
 if (!S.inArtifact && 'serviceWorker' in navigator && location.protocol !== 'file:') {

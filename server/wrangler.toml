@@ -1,0 +1,10 @@
+name = "uborka"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# База дома. Ключ доступа — секрет HOME_KEY (wrangler secret put HOME_KEY), в коде его нет.
+[[d1_databases]]
+binding = "DB"
+database_name = "uborka"
+database_id = "3549ff3a-92d2-4347-b199-519785ab5073"
