@@ -277,13 +277,13 @@ function renderNow() {
   const back = lastAct !== null && t - lastAct >= AWAY_DAYS * L.DAY && st.pause === null;
   const title = back
     ? 'С возвращением'
-    : new Date(t).getHours() >= 18 && L.ritual(st, 'evening').length > 0 && L.ritualSteps(st, 'evening', t).length === 0
+    : (new Date(t).getHours() >= 18 || new Date(t).getHours() < L.DAY_START_H) && L.ritual(st, 'evening').length > 0 && L.ritualSteps(st, 'evening', t).length === 0
       ? 'На сегодня хватит'
     : h >= 0.85 ? 'Дома уютно' : h >= 0.65 ? 'Дому нужно чуть-чуть заботы' : h >= 0.45 ? 'Дом соскучился по вам' : 'Зажжём одно окошко?';
   const small = L.buildSession(st, t, 5).filter((x) => x.kind === 'task').length;
   const hour = new Date(t).getHours();
-  const eveningDone = hour >= 18 && L.ritual(st, 'evening').length > 0 && L.ritualSteps(st, 'evening', t).length === 0;
-  const morningDone = hour < 14 && L.ritual(st, 'morning').length > 0 && L.ritualSteps(st, 'morning', t).length === 0;
+  const eveningDone = (hour >= 18 || hour < L.DAY_START_H) && L.ritual(st, 'evening').length > 0 && L.ritualSteps(st, 'evening', t).length === 0;
+  const morningDone = hour >= L.DAY_START_H && hour < 14 && L.ritual(st, 'morning').length > 0 && L.ritualSteps(st, 'morning', t).length === 0;
   const few = (n) => (n <= 3 ? 'Пара мелочей' : 'Несколько мелочей');
   const buddyLine = eveningDone
     ? ['Вечер сделан. Отдыхайте — я присмотрю.', 'happy']
@@ -453,7 +453,10 @@ function renderSettings() {
       ${timeRow('evening', 'Вечерние мелочи', 'Каждый день')}
       ${timeRow('weekly', 'Забота о доме', 'Раз в неделю, около 30 минут',
         `<select class="field time" data-act="rt-day">${L.WEEKDAYS.map((d, i) => `<option value="${i}" ${r.weekly.day === i ? 'selected' : ''}>${d}</option>`).join('')}</select>`)}
-      <button class="btn wide primary" data-act="rt-ics" style="margin-top:8px">Добавить в календарь</button>
+      ${S.inArtifact
+        ? `<a class="btn wide primary" href="${icsLink()}" target="_blank" rel="noopener" style="margin-top:8px">Добавить в календарь</a>
+           <p class="small dim" style="margin-bottom:0">Откроется страница «Уборки» в браузере — там календарь заберёт файл.</p>`
+        : '<button class="btn wide primary" data-act="rt-ics" style="margin-top:8px">Добавить в календарь</button>'}
       <p class="small dim" style="margin-bottom:0">Откроется файл — календарь предложит добавить события. Поменяли время — нажмите ещё раз и удалите старые события «Уборка».</p>
     </div>
 
@@ -491,7 +494,7 @@ function renderSettings() {
       <button class="btn wide ghost confirm" data-act="reset-marks">${armed === 'reset-marks' ? 'Точно сбросить? Нажмите ещё раз' : 'Сбросить отметки'}</button>
     </div>
     <button class="btn wide ghost" style="margin-top:16px" data-act="setup-again">Пройти знакомство заново</button>
-    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.7</p>`;
+    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.8</p>`;
 }
 
 /* ---------- лист задачи ---------- */
@@ -555,7 +558,133 @@ function currentCtx() {
   return { now: 'Главная', home: 'Комнаты', settings: 'Настройки' }[tab];
 }
 
+/* ---------- чат с Claude (версия внутри Claude) ---------- */
+// Сообщение пишется в общую базу (chat/<id>) и отправляется Claude в ветку комментариев артефакта.
+// Claude отвечает в ту же ветку и записывает ответ в базу — приложение показывает его здесь.
+
+let chat = { msgs: [], can: 'off', thread: null, names: {}, open: false, sending: false };
+
+async function startChat() {
+  const db = S.database();
+  if (!db) return;
+  db.collection('chat').orderBy('at').limit(100).onSnapshot((snap) => {
+    chat.msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    loadNames();
+    if (chat.open) renderChat();
+  });
+  db.doc('home/chat').onSnapshot((s) => {
+    chat.thread = (s.exists && s.data().threadId) || null;
+  });
+}
+
+async function loadNames() {
+  const ids = [...new Set(chat.msgs.map((m) => m.by).filter((id) => id && !(id in chat.names)))];
+  if (!ids.length) return;
+  try {
+    const user = await window.claude.use('user');
+    const ps = user ? await user.profiles(ids) : {};
+    for (const id of ids) chat.names[id] = (ps[id] && ps[id].name) || '';
+    if (chat.open) renderChat();
+  } catch {
+    /* имена не обязательны */
+  }
+}
+
+async function refreshCan() {
+  try {
+    const c = await window.claude.use('comments');
+    chat.can = c ? await c.canSendToClaude() : 'off';
+  } catch {
+    chat.can = 'off';
+  }
+  if (chat.open) renderChat();
+}
+
+const CAN_TEXT = {
+  available: 'Claude на связи — ответит прямо здесь.',
+  no_session: 'Claude сейчас не на связи. Сообщение сохранится, он прочитает его, как только вернётся.',
+  writers_only: 'Отправлять Claude может тот, у кого есть права редактора. Сообщение сохранится в общей переписке.',
+  off: 'Отправка Claude здесь недоступна. Сообщение сохранится в общей переписке.',
+};
+const STATUS_TEXT = { sent: 'отправлено', saved: 'сохранено — Claude прочитает позже', answered: 'Claude ответил', consent: 'не отправлено: нужно разрешение' };
+
+function renderChat() {
+  const who = (m) => (m.role === 'claude' ? 'Claude' : m.by && m.by === S.me ? 'Вы' : chat.names[m.by] || 'Жилец');
+  const time = (ts) => new Date(ts).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const list = chat.msgs.length
+    ? chat.msgs
+        .map((m) => `<div class="msg ${m.role === 'claude' ? 'from-claude' : 'from-me'}">
+          <b>${esc(who(m))}</b>${esc(m.text)}
+          <small>${time(m.at)}${m.ctx ? ' · ' + esc(m.ctx) : ''}${m.role !== 'claude' && STATUS_TEXT[m.status] ? ' · ' + STATUS_TEXT[m.status] : ''}</small></div>`)
+        .join('')
+    : `<p class="mut small">Здесь можно написать, что неудобно, попросить поправить приложение или спросить про уборку. Ответ придёт сюда.</p>`;
+  const draft = $('#chat-text') ? $('#chat-text').value : '';
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>Написать Claude</h2>
+    <div class="mut small">${CAN_TEXT[chat.can] || CAN_TEXT.off}</div>
+    <div class="chat-list" id="chat-list">${list}</div>
+    <textarea class="field note-text" id="chat-text" rows="3" maxlength="2000" placeholder="Например: сделай кнопку «Позже» крупнее"></textarea>
+    <button class="btn wide primary" data-act="chat-send" ${chat.sending ? 'disabled' : ''}>${chat.sending ? 'Отправляю…' : 'Отправить'}</button>
+    <p class="small dim">Где вы сейчас: ${esc(noteCtx)}</p>`;
+  $('#chat-text').value = draft;
+  const box = $('#chat-list');
+  box.scrollTop = box.scrollHeight;
+}
+
+function openChat() {
+  noteCtx = currentCtx();
+  chat.open = true;
+  renderChat();
+  openSheetEl();
+  refreshCan();
+}
+
+async function sendChat() {
+  const el = $('#chat-text');
+  const text = (el ? el.value : '').trim();
+  if (!text || chat.sending) return;
+  const db = S.database();
+  const id = 'm' + now().toString(36);
+  const body = `Из приложения «Уборка» · ${noteCtx}\n${text}\n(сообщение ${id})`;
+  let status = 'saved';
+  let threadId = null;
+  chat.sending = true;
+  renderChat();
+  // Отправка Claude — сразу по нажатию: платформа принимает её только от свежего действия человека.
+  try {
+    const c = await window.claude.use('comments');
+    if (c && chat.can === 'available') {
+      let res;
+      try {
+        res = chat.thread
+          ? await c.sendToClaude({ threadId: chat.thread, text: body })
+          : await c.sendToClaude({ anchor: await c.anchorFor($('#view')), text: body });
+      } catch (e) {
+        if (e && e.code === 'not_found') res = await c.sendToClaude({ anchor: await c.anchorFor($('#view')), text: body });
+        else throw e;
+      }
+      threadId = res.threadId;
+      status = 'sent';
+      if (res.threadId !== chat.thread) {
+        chat.thread = res.threadId;
+        db.doc('home/chat').set({ threadId: res.threadId });
+      }
+    }
+  } catch (e) {
+    status = e && e.code === 'consent_required' ? 'consent' : 'saved';
+  }
+  try {
+    await db.collection('chat').doc(id).set({ role: 'user', by: S.me, text, ctx: noteCtx, at: now(), status, threadId });
+    $('#chat-text').value = '';
+  } catch {
+    toast('Не получилось сохранить сообщение — проверьте интернет');
+  }
+  chat.sending = false;
+  renderChat();
+}
+
 function openNoteSheet() {
+  if (S.shared) return openChat();
   noteCtx = currentCtx();
   $('#sheet').innerHTML = `<h2>Что неудобно?</h2>
     <div class="mut small">Где: ${esc(noteCtx)}</div>
@@ -570,7 +699,7 @@ function openNoteSheet() {
 async function copyNotes() {
   const text = 'Заметки из «Уборки» — что неудобно:\n' + L.notesText(st);
   try {
-    if (navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+    if (!S.inArtifact && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
       await navigator.share({ text });
       return;
     }
@@ -584,15 +713,40 @@ async function copyNotes() {
   }
 }
 
+const GITHUB_APP = 'https://sapronovigor96-jpg.github.io/uborka/';
+
 function downloadIcs() {
   const url = location.origin + location.pathname;
-  const blob = new Blob([L.makeIcs(st, now(), url)], { type: 'text/calendar;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'uborka-napominaniya.ics';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  S.saveFile('uborka-napominaniya.ics', L.makeIcs(st, now(), url), 'text/calendar;charset=utf-8');
   toast('Файл готов — откройте его, календарь добавит напоминания');
+}
+
+// Ссылка для версии внутри Claude: события передаются после «#» — эта часть не уходит на сервер.
+function icsLink() {
+  const events = L.reminderEvents(st, now());
+  return GITHUB_APP + '#ics=' + encodeURIComponent(JSON.stringify(events));
+}
+
+// GitHub-версия, открытая по такой ссылке: показать экран «Скачать напоминания».
+function icsFromHash() {
+  if (!location.hash.startsWith('#ics=')) return false;
+  let events;
+  try {
+    events = JSON.parse(decodeURIComponent(location.hash.slice(5)));
+  } catch {
+    return false;
+  }
+  const el = $('#setup');
+  el.hidden = false;
+  el.innerHTML = `<div class="inner"><div class="s-body setup-body">
+      <div class="s-kind">Напоминания</div>
+      <h1>Добавим в календарь</h1>
+      <p class="mut">${events.map((e) => esc(e.title)).join('<br>')}</p>
+      <p class="small dim">Откроется файл — календарь предложит добавить события.</p>
+    </div>
+    <div class="s-actions"><button class="btn primary" id="ics-go">Скачать напоминания</button></div></div>`;
+  $('#ics-go').onclick = () => S.saveFile('uborka-napominaniya.ics', L.makeIcsFromEvents(events, now(), GITHUB_APP), 'text/calendar;charset=utf-8');
+  return true;
 }
 
 /* ---------- уборка одной комнаты ---------- */
@@ -683,6 +837,7 @@ function openSheetEl() {
 }
 
 function closeSheet() {
+  chat.open = false;
   $('#sheet').hidden = true;
   $('#sheet-bg').hidden = true;
 }
@@ -1167,6 +1322,8 @@ document.addEventListener('click', (e) => {
       return render();
     case 'rt-ics':
       return downloadIcs();
+    case 'chat-send':
+      return sendChat();
     case 'note':
       return openNoteSheet();
     case 'note-save': {
@@ -1340,11 +1497,23 @@ document.addEventListener('visibilitychange', () => {
   } else render();
 });
 
-render();
-if (st.session) renderSession();
+if (!icsFromHash()) {
+  render();
+  if (st.session) renderSession();
+}
 S.askPersist();
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+// Внутри Claude: подключаем общую базу и чат. Чужие отметки приходят сами и перерисовывают экран.
+S.connect(st, now(), () => {
+  if (!st.session || $('#session').hidden) render();
+}).then((ok) => {
+  if (ok) {
+    startChat();
+    render();
+  }
+});
+
+if (!S.inArtifact && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   // Пришла новая версия — перезагрузиться один раз, чтобы не показывать старую.
   // Только если страницей уже управляла прежняя версия (при первой установке — не нужно).
   const hadController = !!navigator.serviceWorker.controller;

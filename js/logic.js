@@ -436,8 +436,12 @@ export function dailyTasks(st) {
   return activeTasks(st).filter((t) => effEvery(t, st) <= 1);
 }
 
+// «День» для мелочей начинается в 4 утра: вечер, закончившийся после полуночи, — всё ещё вчерашний.
+export const DAY_START_H = 4;
+const dayKey = (ts) => new Date(ts - DAY_START_H * 3600000).toDateString();
+
 export function sameDay(a, b) {
-  return a !== undefined && new Date(a).toDateString() === new Date(b).toDateString();
+  return a !== undefined && dayKey(a) === dayKey(b);
 }
 
 export function ritual(st, which) {
@@ -451,7 +455,8 @@ export function ritualSteps(st, which, now) {
 
 // Какой ритуал сейчас уместнее: до 14:00 — утро, потом — вечер.
 export function currentRitual(now) {
-  return new Date(now).getHours() < 14 ? 'morning' : 'evening';
+  const h = new Date(now).getHours();
+  return h >= DAY_START_H && h < 14 ? 'morning' : 'evening';
 }
 
 // ---------- напоминания: файл для календаря телефона ----------
@@ -517,10 +522,15 @@ export function reminderEvents(st, now) {
 // Календарь с повторяющимися событиями и напоминанием в момент начала.
 // UID постоянные: повторный импорт обновляет события, а не дублирует (где календарь это умеет).
 export function makeIcs(st, now, url = '') {
+  return makeIcsFromEvents(reminderEvents(st, now), now, url);
+}
+
+// Тот же календарь из готового списка событий — для страницы на GitHub, куда их передаёт версия в Claude.
+export function makeIcsFromEvents(events, now, url = '') {
   const d = new Date(now);
   const stamp = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Uborka//RU', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Уборка'];
-  for (const e of reminderEvents(st, now)) {
+  for (const e of events) {
     const [hh, mm] = e.time.split(':');
     const desc = e.text + (url ? `\n\nОткрыть приложение: ${url}` : '');
     lines.push(

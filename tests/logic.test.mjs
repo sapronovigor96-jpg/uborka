@@ -314,3 +314,13 @@ test('«уже сделано» засчитывается, но не учит �
   assert.equal(L.effMin(t, st), t.min);
   assert.ok(st.log.every((e) => e.pre));
 });
+
+test('день для мелочей начинается в 4 утра', () => {
+  const late = new Date(2026, 8, 26, 23, 30).getTime();
+  const night = new Date(2026, 8, 27, 1, 0).getTime();
+  const morning = new Date(2026, 8, 27, 8, 0).getTime();
+  assert.ok(L.sameDay(late, night), 'вечер и час ночи — один день');
+  assert.ok(!L.sameDay(night, morning), 'утро — уже новый день');
+  assert.equal(L.currentRitual(night), 'evening');
+  assert.equal(L.currentRitual(morning), 'morning');
+});
