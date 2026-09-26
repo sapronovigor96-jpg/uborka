@@ -1,6 +1,6 @@
 // Офлайн: всё приложение кладётся в кэш при установке.
 // При изменении любого файла — поднять VERSION, иначе телефон покажет старую версию.
-const VERSION = 'uborka-0.5.2';
+const VERSION = 'uborka-0.6.1';
 const FILES = [
   './',
   'index.html',
@@ -8,6 +8,7 @@ const FILES = [
   'js/app.js',
   'js/data.js',
   'js/logic.js',
+  'js/why.js',
   'js/store.js',
   'manifest.webmanifest',
   'icons/icon.svg',

@@ -1,5 +1,6 @@
 // Чистая логика без DOM и хранилища — тестируется в node (tests/logic.test.mjs).
 import { ZONES, TASKS } from './data.js';
+import { WHY } from './why.js';
 
 export const DAY = 86400000;
 export const DUE = 0.85; // с какой срочности задача считается «пора»
@@ -209,7 +210,7 @@ export function buildSession(st, now, budget, minUrg = DUE, zone = null) {
     let best = null;
     let bestScore = -Infinity;
     for (const x of pool) {
-      const cost = x.t.min + (x.t.prep ? 1 : 0);
+      const cost = effMin(x.t, st) + (x.t.prep ? 1 : 0);
       if (used + cost > budget) continue;
       const score = priority(x.t, x.u) + (rooms.has(zoneOf(x.t, st)) ? SAME_ROOM : 0);
       if (score > bestScore) {
@@ -221,14 +222,14 @@ export function buildSession(st, now, budget, minUrg = DUE, zone = null) {
     pool.splice(pool.indexOf(best), 1);
     picked.push(best.t);
     rooms.add(zoneOf(best.t, st));
-    used += best.t.min + (best.t.prep ? 1 : 0);
+    used += effMin(best.t, st) + (best.t.prep ? 1 : 0);
   }
   return orderSteps(picked, st);
 }
 
 export function orderSteps(tasks, st) {
   const zo = (t) => zoneById[zoneOf(t, st)].order;
-  const step = (kind, t) => ({ kind, id: t.id, zone: zoneOf(t, st), text: label(t, st, kind === 'prep' ? t.prep : t.t), min: kind === 'prep' ? 1 : t.min });
+  const step = (kind, t) => ({ kind, id: t.id, zone: zoneOf(t, st), text: label(t, st, kind === 'prep' ? t.prep : t.t), min: kind === 'prep' ? 1 : effMin(t, st) });
   const isFloor = (t) => (t.tags || []).includes('floor');
   const preps = tasks
     .filter((t) => t.prep)
@@ -249,24 +250,49 @@ export function sessionMinutes(steps) {
   return steps.reduce((s, x) => s + x.min, 0);
 }
 
-export function complete(st, taskId, now, min) {
+// real — минуты замерены таймером уборки (из них приложение учится, сколько дело занимает у вас).
+// prev — прежняя дата, чтобы отмена вернула всё точно как было.
+export function complete(st, taskId, now, min, real = false) {
+  const prev = st.last[taskId];
   st.last[taskId] = clock(st, now);
   const own = (st.custom || []).find((x) => x.id === taskId);
   if (own) own.soon = false;
-  st.log.push({ id: taskId, at: now, min });
+  st.log.push({ id: taskId, at: now, min, prev, real });
   if (st.log.length > LOG_CAP) st.log.splice(0, st.log.length - LOG_CAP);
 }
 
-// Отменить последнюю отметку задачи (ошибочное нажатие).
+// Отменить последнюю отметку задачи (ошибочное нажатие). Дата возвращается к прежней.
 export function undoComplete(st, taskId, prevLast) {
+  let entry = null;
   for (let i = st.log.length - 1; i >= 0; i--) {
     if (st.log[i].id === taskId) {
-      st.log.splice(i, 1);
+      entry = st.log.splice(i, 1)[0];
       break;
     }
   }
-  if (prevLast === undefined) delete st.last[taskId];
-  else st.last[taskId] = prevLast;
+  const prev = entry && 'prev' in entry ? entry.prev : prevLast;
+  if (prev === undefined || prev === null) delete st.last[taskId];
+  else st.last[taskId] = prev;
+}
+
+// Сколько дело занимает именно у вас: медиана последних 5 замеров таймером (нужно хотя бы 3).
+export function effMin(t, st) {
+  const real = [];
+  for (let i = st.log.length - 1; i >= 0 && real.length < 5; i--) {
+    const e = st.log[i];
+    if (e.id === t.id && e.real) real.push(e.min);
+  }
+  if (real.length < 3) return t.min;
+  real.sort((a, b) => a - b);
+  return Math.max(1, Math.round(real[Math.floor(real.length / 2)]));
+}
+
+export function learned(t, st) {
+  return effMin(t, st) !== t.min || st.log.filter((e) => e.id === t.id && e.real).length >= 3;
+}
+
+export function why(t) {
+  return WHY[t.id] || null;
 }
 
 export function setZone(st, zoneId, on, now) {

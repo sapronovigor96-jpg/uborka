@@ -249,3 +249,45 @@ test('заметки: пустая не сохраняется, текст дл�
   assert.ok(txt.includes('Кнопка «Позже» мелкая') && txt.includes('[Уборка · Унитаз]'));
   assert.ok(!txt.includes('Уже поправили'));
 });
+
+test('отмена возвращает точную прежнюю дату, даже стартовую', () => {
+  const st = fresh();
+  L.setZone(st, 'balcony', true, NOW);
+  const seeded = st.last['p-sweep'];
+  L.complete(st, 'p-sweep', NOW + L.DAY, 5);
+  L.complete(st, 'p-sweep', NOW + 2 * L.DAY, 5);
+  L.undoComplete(st, 'p-sweep');
+  assert.equal(st.last['p-sweep'], NOW + L.DAY);
+  L.undoComplete(st, 'p-sweep');
+  assert.equal(st.last['p-sweep'], seeded);
+});
+
+test('отметить — снять — отметить снова работает', () => {
+  const st = fresh();
+  L.complete(st, 'k-trash', NOW, 2);
+  L.undoComplete(st, 'k-trash');
+  L.complete(st, 'k-trash', NOW, 2);
+  assert.equal(st.last['k-trash'], NOW);
+  assert.equal(st.log.filter((e) => e.id === 'k-trash').length, 1);
+});
+
+test('длительность учится на замерах таймера, а не на ручных отметках', () => {
+  const st = fresh();
+  const t = L.task(st, 'b-toilet');
+  assert.equal(L.effMin(t, st), 7);
+  L.complete(st, t.id, NOW, 12, false);
+  L.complete(st, t.id, NOW, 12, false);
+  L.complete(st, t.id, NOW, 12, false);
+  assert.equal(L.effMin(t, st), 7);
+  L.complete(st, t.id, NOW, 11, true);
+  L.complete(st, t.id, NOW, 13, true);
+  L.complete(st, t.id, NOW, 12, true);
+  assert.equal(L.effMin(t, st), 12);
+});
+
+test('у каждого дела из базы есть «даст» и «если пропустить»', () => {
+  for (const t of TASKS) {
+    const w = L.why(t);
+    assert.ok(w && w[0] && w[1], `нет пояснения для ${t.id}`);
+  }
+});

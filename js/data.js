@@ -99,7 +99,8 @@ export const TASKS = [
 
   // Спальня
   { id: 's-bed', z: 'bedroom', t: 'Заправить кровать', every: 1, min: 2, ord: 9, when: 'morning' },
-  { id: 's-clothes', z: 'bedroom', t: 'Одежда на места, чашки — на кухню', every: 1, min: 3, ord: 1, when: 'evening' },
+  { id: 's-clothes', z: 'bedroom', t: 'Одежда — в шкаф или в стирку', every: 1, min: 3, ord: 1, when: 'evening' },
+  { id: 's-cups', z: 'bedroom', t: 'Чашки и тарелки — на кухню', every: 1, min: 1, ord: 1, when: 'evening' },
   { id: 's-linen', z: 'bedroom', t: 'Снять постельное бельё и запустить стирку', every: 14, min: 3, ord: 0, tags: ['linen', 'hyg'], hint: 'Пока убираешь — оно стирается. 60 °C. Застелить чистое — в конце.' },
   { id: 's-dust', z: 'bedroom', t: 'Пыль: люстра, шкаф, полки, тумбочки, подоконник', every: 7, min: 5, ord: 2, tags: ['dust'] },
   { id: 's-throws', z: 'bedroom', t: 'Пледы и покрывала — в стирку', every: 30, min: 3, ord: 0 },

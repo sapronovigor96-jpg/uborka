@@ -42,10 +42,6 @@ function taskMeta(t) {
   return `${ago}${L.fmtEvery(L.effEvery(t, st))} · ${t.min} мин`;
 }
 
-function isToday(ts) {
-  return ts !== undefined && new Date(ts).toDateString() === new Date().toDateString();
-}
-
 // Домик: каждое окно — комната. Чем чище комната, тем теплее горит свет.
 function house(zones, glowZones = []) {
   const cols = 3;
@@ -86,7 +82,7 @@ function toast(text, undo) {
   const el = $('#toast');
   el.innerHTML = `<span>${esc(text)}</span>${undo ? '<button data-act="undo">Вернуть</button>' : ''}`;
   // Во время уборки внизу — кнопка «Готово», сообщение не должно её закрывать.
-  el.classList.toggle('top', !$('#session').hidden);
+  el.classList.toggle('top', !$('#session').hidden || !$('#sheet').hidden);
   el.hidden = false;
   toast.undo = undo;
   clearTimeout(toast.t);
@@ -103,6 +99,41 @@ function buzz(ms = 20) {
   } catch {
     /* нет вибро — не страшно */
   }
+}
+
+/* ---------- домовёнок ---------- */
+
+const buddyName = () => (st.buddy || '').trim() || 'Тишка';
+const FINISH_LINES = ['Вот это да! Стало светлее.', 'Спасибо! Мне тут так уютно.', 'Красота. Отдыхайте, я присмотрю.'];
+
+// Домовёнок: пушистый, в шапке-чёлке. Настроения: calm, happy, sleepy, cheer.
+function mascot(mood = 'calm') {
+  const eyes = {
+    calm: '<circle cx="25" cy="39" r="2.8" class="ink"/><circle cx="39" cy="39" r="2.8" class="ink"/><circle cx="26" cy="38" r=".9" class="shine"/><circle cx="40" cy="38" r=".9" class="shine"/>',
+    happy: '<path d="M22 40q3-4 6 0M36 40q3-4 6 0" class="line"/>',
+    cheer: '<path d="M22 40q3-4 6 0M36 40q3-4 6 0" class="line"/>',
+    sleepy: '<path d="M22 40h6M36 40h6" class="line"/>',
+  }[mood];
+  const mouth = {
+    calm: '<path d="M29 46q3 2 6 0" class="line"/>',
+    happy: '<path d="M28 45q4 5 8 0" class="line"/>',
+    cheer: '<path d="M28 44q4 7 8 0z" class="ink"/>',
+    sleepy: '<circle cx="32" cy="47" r="1.4" class="ink"/>',
+  }[mood];
+  const arms = mood === 'cheer' ? '<path d="M12 40l-6-9M52 40l6-9" class="arm"/>' : '<path d="M12 44l-4 4M52 44l4 4" class="arm"/>';
+  return `<svg class="mascot ${mood}" viewBox="0 0 64 64" aria-hidden="true">
+    ${arms}
+    <ellipse cx="24" cy="58" rx="6" ry="3" class="hair"/><ellipse cx="40" cy="58" rx="6" ry="3" class="hair"/>
+    <ellipse cx="32" cy="40" rx="21" ry="19" class="body"/>
+    <path d="M11 37C10 17 54 17 53 37C48 29 42 33 37 27C33 32 27 29 25 25C21 31 16 29 11 37Z" class="hair"/>
+    <path d="M30 17q2-7 6-5" class="tuft"/>
+    <circle cx="19" cy="46" r="3.2" class="cheek"/><circle cx="45" cy="46" r="3.2" class="cheek"/>
+    ${eyes}${mouth}
+  </svg>`;
+}
+
+function say(text, mood = 'calm') {
+  return `<div class="buddy">${mascot(mood)}<div class="bubble"><b>${esc(buddyName())}</b>${esc(text)}</div></div>`;
 }
 
 /* ---------- знакомство с домом ---------- */
@@ -193,6 +224,16 @@ function weekDots() {
   return `<div class="week">${days.join('')}</div>`;
 }
 
+function ritualNowFor(t, rLeft) {
+  return !ritualView && rLeft.length ? L.currentRitual(t) : null;
+}
+
+// Сделано ли дело сегодня — по журналу (стартовые даты не считаются).
+function doneToday(id) {
+  const t = now();
+  return st.log.some((e) => e.id === id && L.sameDay(e.at, t));
+}
+
 function renderNow() {
   const t = now();
   const zones = L.zonesShown(st);
@@ -202,10 +243,10 @@ function renderNow() {
   const which = ritualView || L.currentRitual(t);
   const other = which === 'morning' ? 'evening' : 'morning';
   const rList = L.ritual(st, which);
-  const rDone = rList.filter((x) => isToday(st.last[x.id])).length;
+  const rDone = rList.filter((x) => doneToday(x.id)).length;
   const rLeft = L.ritualSteps(st, which, t);
   const oList = L.ritual(st, other);
-  const oDone = oList.filter((x) => isToday(st.last[x.id])).length;
+  const oDone = oList.filter((x) => doneToday(x.id)).length;
   const due = L.dueTasks(st, t).filter((x) => L.effEvery(x.t, st) > 1);
   const wk = L.stats(st, t);
   const lastAct = st.log.length ? st.log[st.log.length - 1].at : null;
@@ -214,6 +255,12 @@ function renderNow() {
     ? 'С возвращением'
     : h >= 0.85 ? 'Дома уютно' : h >= 0.65 ? 'Дому нужно чуть-чуть заботы' : h >= 0.45 ? 'Дом соскучился по вам' : 'Зажжём одно окошко?';
   const small = L.buildSession(st, t, 5).filter((x) => x.kind === 'task').length;
+  const buddyLine = back
+    ? ['Я тут всё сторожил. Начнём с малого?', 'calm']
+    : ritualNowFor(t, rLeft) === 'morning' ? ['Доброе утро! Пара мелочей — и день пойдёт легче.', 'happy']
+    : ritualNowFor(t, rLeft) === 'evening' ? ['Вечер. Пара мелочей — и можно отдыхать.', 'calm']
+    : h >= 0.85 ? ['Как хорошо у нас. Можно просто отдохнуть.', 'happy']
+    : ['Одно маленькое дело — и в доме станет светлее.', 'calm'];
   // Главная кнопка: сначала ежедневный ритуал этого времени суток, если он не сделан.
   const ritualNow = !ritualView && rLeft.length ? L.currentRitual(t) : null;
   const mainBtn = ritualNow
@@ -238,6 +285,7 @@ function renderNow() {
       <h1>${title}</h1>
       <div class="mut small">${back ? 'Ничего не потеряно — начнём с малого' : `Свет горит в ${lit} из ${zones.length} ${L.plural(zones.length, 'комнаты', 'комнат', 'комнат')}`}</div>
     </div>
+    ${say(...buddyLine)}
     ${mainBtn}
 
     <div class="sec-title">${ritualNow ? 'Или уборка на время' : 'Есть больше времени?'}</div>
@@ -258,7 +306,7 @@ function renderNow() {
     ${rList.length && !rLeft.length ? `<p class="small ok-note">${which === 'morning' ? 'Утро сделано — хорошего дня.' : 'Вечер сделан — можно отдыхать.'}</p>` : ''}
     <ul class="tl daily">${rList
       .map((x) => {
-        const done = isToday(st.last[x.id]);
+        const done = doneToday(x.id);
         return `<li class="${done ? 'is-done' : ''}"><button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${x.id}" aria-label="Сделано">✓</button>
           <button class="tt" data-act="task" data-id="${x.id}">${esc(tname(x))}<small>${esc(zname(L.zoneOf(x, st)))} · ${x.min} мин</small></button></li>`;
       })
@@ -277,11 +325,12 @@ function renderNow() {
 
 function taskRow(t, showZone) {
   const u = L.urgency(t, st, now());
-  return `<li>
-    <span class="dot ${dotClass(u)}"></span>
+  const done = doneToday(t.id);
+  return `<li class="${done ? 'is-done' : ''}">
+    <span class="dot ${done ? '' : dotClass(u)}"></span>
     <button class="tt" data-act="task" data-id="${t.id}">${esc(tname(t))}
       <small>${showZone ? esc(zname(L.zoneOf(t, st))) + ' · ' : ''}${taskMeta(t)}</small></button>
-    <button class="check" data-act="done" data-id="${t.id}" aria-label="Сделано">✓</button>
+    <button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${t.id}" aria-label="${done ? 'Снять отметку' : 'Сделано'}">✓</button>
   </li>`;
 }
 
@@ -306,7 +355,8 @@ function zonesHtml() {
           ts = ts.filter((x) => tname(x).toLowerCase().includes(q));
           if (!ts.length) return '';
         }
-        ts.sort((a, b) => L.urgency(b, st, t) - L.urgency(a, st, t));
+        const isFloor = (x) => (x.tags || []).includes('floor');
+        ts.sort((a, b) => Number(isFloor(a)) - Number(isFloor(b)) || a.ord - b.ord || L.effEvery(a, st) - L.effEvery(b, st));
         const h = L.zoneHealth(st, z.id, t);
         const n = ts.filter((x) => L.urgency(x, st, t) >= L.DUE).length;
         return `<details class="card zone" id="zone-${z.id}" data-zone="${z.id}" ${q || openZones.has(z.id) ? 'open' : ''}>
@@ -353,6 +403,10 @@ function renderSettings() {
       ${doneNotes.length ? `<details class="done-notes"><summary class="small mut">Решено: ${doneNotes.length}</summary><ul class="tl notes">${doneNotes.map(noteLi).join('')}</ul></details>` : ''}
     </div>
 
+    <div class="sec-title">Домовёнок</div>
+    <div class="card">${say('Это я присматриваю за домом. Можете звать меня как хотите.', 'happy')}
+      <input class="field" data-act="buddy-name" placeholder="Имя" value="${esc(buddyName())}" maxlength="16" style="margin-top:10px"></div>
+
     <div class="sec-title">Напоминания</div>
     <div class="card">
       <p class="small mut" style="margin-top:0">Напоминания живут в календаре телефона — там они надёжно звенят, даже когда приложение закрыто.</p>
@@ -393,7 +447,7 @@ function renderSettings() {
       <label class="btn wide ghost">Загрузить из копии<input type="file" accept="application/json,.json" data-act="import" hidden></label>
     </div>
     <button class="btn wide ghost" style="margin-top:16px" data-act="setup-again">Пройти знакомство заново</button>
-    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.5</p>`;
+    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.6</p>`;
 }
 
 /* ---------- лист задачи ---------- */
@@ -406,8 +460,13 @@ function openSheet(id) {
   const cur = L.effEvery(t, st);
   const own = st.every[id];
   const kit = L.kitFor(t);
-  $('#sheet').innerHTML = `<h2>${esc(tname(t))}</h2>
+  const w = L.why(t);
+  const usual = L.effMin(t, st) !== t.min ? `<p class="small mut">Обычно у вас уходит ~${L.effMin(t, st)} мин — приложение это учитывает.</p>` : '';
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>${esc(tname(t))}</h2>
     <div class="mut small">${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
+    ${w ? `<div class="why-box"><p><b>Даст:</b> ${esc(w[0])}</p><p class="mut"><b>Если пропустить:</b> ${esc(w[1])}</p></div>` : ''}
+    ${usual}
     ${t.prep ? `<p class="small"><b>Сначала:</b> ${esc(L.label(t, st, t.prep))} — и ${t.wait} мин пусть действует.</p>` : ''}
     ${t.hint ? `<p class="small mut">${esc(t.hint)}</p>` : ''}
     ${kit.length ? `<p class="small mut">Понадобится: ${esc(kit.join(', ').toLowerCase())}</p>` : ''}
@@ -418,7 +477,7 @@ function openSheet(id) {
       <button class="chip ${own ? '' : 'on'}" data-act="freq" data-id="${id}" data-v="0">Как советуют · ${L.fmtEvery(t.every)}</button>
       ${FREQS.map((f) => `<button class="chip ${own === f ? 'on' : ''}" data-act="freq" data-id="${id}" data-v="${f}">${L.fmtEvery(f)}</button>`).join('')}
     </div>
-    ${own ? '' : cur !== t.every ? `<p class="small mut">Сейчас ${L.fmtEvery(cur)} — с учётом того, кто живёт дома.</p>` : ''}
+    <p class="small mut">${own ? 'Сохраняется сразу.' : cur !== t.every ? `Сейчас ${L.fmtEvery(cur)} — с учётом того, кто живёт дома. Изменения сохраняются сразу.` : 'Изменения сохраняются сразу.'}</p>
     <div class="stack" style="margin-top:20px">
       <button class="btn wide primary" data-act="done" data-id="${id}">Сделано сегодня</button>
       <button class="btn wide" data-act="done-yday" data-id="${id}">Сделано вчера</button>
@@ -588,12 +647,11 @@ function closeSheet() {
 
 function markDone(id, at = now(), min) {
   const t = L.task(st, id);
-  const prev = st.last[id];
   L.complete(st, id, at, min ?? t.min);
   commit();
   buzz();
   toast(`${pick(THANKS)} ${tname(t)}`, () => {
-    L.undoComplete(st, id, prev);
+    L.undoComplete(st, id);
     commit();
     render();
   });
@@ -727,7 +785,7 @@ function renderSession() {
 
   if (ss.idx >= ss.steps.length) {
     clearInterval(tick);
-    const mins = Math.max(1, ss.min);
+    const mins = Math.max(1, Math.round(ss.min));
     const touched = [...new Set(ss.zones)];
     const zones = touched.map(zname);
     const note = ss.ritual === 'morning' ? 'Утро началось с заботы. Хорошего дня.'
@@ -735,6 +793,7 @@ function renderSession() {
       : ss.done >= 5 ? 'Теперь можно заварить чай и полюбоваться.' : 'Маленький шаг — тоже шаг. Дом это чувствует.';
     inner(`<div class="s-body finish">
       ${ss.done ? house(L.zonesShown(st), touched) : ''}
+      ${say(ss.done ? pick(FINISH_LINES) : 'Ничего, я подожду. Дом никуда не денется.', ss.done ? 'cheer' : 'calm')}
       <h1>${ss.done ? 'Дом стал уютнее' : 'Хорошо, что заглянули'}</h1>
       <p class="mut">${ss.done ? `${dela(ss.done)} за ${mins} мин${zones.length ? ' · ' + esc(zones.join(', ')) : ''}` : 'Вернётесь, когда будут силы — дом подождёт.'}</p>
       ${ss.done ? `<p class="small mut">${note}</p>` : ''}
@@ -743,10 +802,13 @@ function renderSession() {
     return;
   }
 
+  ss.doneIds = ss.doneIds || {};
+  ss.mins = ss.mins || {};
   const step = ss.steps[ss.idx];
   const t = L.task(st, step.id);
+  const paused = !!ss.pausedAt;
   // Долго не было (прогулка, звонок) — встречаем и начинаем шаг заново, а не показываем «45:08».
-  const away = now() - ss.stepStart > Math.max(15, step.min * 3) * 60000;
+  const away = !paused && now() - ss.stepStart > Math.max(15, step.min * 3) * 60000;
   if (away) {
     ss.stepStart = now();
     cheer = 'С возвращением — продолжим';
@@ -758,31 +820,73 @@ function renderSession() {
   const prev = ss.steps[ss.idx - 1];
   const moved = step.kind === 'task' && prev && prev.kind === 'task' && prev.zone !== step.zone;
   const kit = step.kind === 'task' ? L.kitFor(t) : [];
+  const isDone = step.kind === 'task' && ss.doneIds[step.id];
+  const w = step.kind === 'task' ? L.why(t) : null;
 
-  inner(`
-    <div class="s-top"><button data-act="s-stop" class="mut">✕ Хватит на сегодня</button><span class="s-tools"><button class="note-btn" data-act="note" aria-label="Что неудобно">✎</button>${soundBtn()}</span></div>
-    <div class="s-prog">${ss.steps.map((_, i) => `<i class="${i < ss.idx ? 'done' : i === ss.idx ? 'cur' : ''}"></i>`).join('')}</div>
+  const top = `<div class="s-top">
+      <button class="icon-btn" data-act="s-back" ${ss.idx ? '' : 'disabled'} aria-label="Предыдущий шаг">‹</button>
+      <span class="s-tools">
+        <button class="icon-btn ${paused ? 'on' : ''}" data-act="s-pause" aria-label="Пауза">${paused ? '▶' : 'Ⅱ'}</button>
+        <button class="icon-btn" data-act="note" aria-label="Что неудобно">✎</button>
+        ${soundBtn()}
+      </span></div>
+    <button class="s-prog" data-act="s-list" aria-label="Все шаги">${ss.steps
+      .map((x, i) => `<i class="${ss.doneIds[x.id] && x.kind === 'task' ? 'done' : i === ss.idx ? 'cur' : i < ss.idx ? 'passed' : ''}"></i>`)
+      .join('')}</button>`;
+
+  if (paused) {
+    clearInterval(tick);
+    inner(`${top}
+      <div class="s-body">
+        ${say('Отдыхаем. Я подожду.', 'sleepy')}
+        <div class="s-text">Пауза</div>
+        <div class="s-hint">${esc(step.text)} · ${mmss(ss.pausedAt - ss.stepStart)} из ~${step.min} мин</div>
+      </div>
+      <div class="s-actions"><button class="btn primary" data-act="s-pause">Продолжить</button>
+        <button class="btn ghost" data-act="s-stop">Хватит на сегодня</button></div>`);
+    return;
+  }
+
+  if (isDone) {
+    clearInterval(tick);
+    inner(`${top}
+      <div class="s-body">
+        <div class="s-kind">${esc(zname(step.zone))}</div>
+        <div class="s-text">${esc(step.text)}</div>
+        <div class="ok-note">✓ Уже сделано</div>
+      </div>
+      <div class="s-actions">
+        <button class="btn primary" data-act="s-next">Дальше</button>
+        <button class="btn ghost" data-act="s-unmark">Снять отметку</button>
+      </div>`);
+    return;
+  }
+
+  inner(`${top}
     <div class="s-body">
-      ${cheer ? `<div class="cheer">${esc(cheer)}</div>` : ''}
+      ${cheer ? `<div class="cheer">${say(cheer, 'happy')}</div>` : ''}
       <div class="s-kind ${step.kind}">${step.kind === 'prep' ? 'Сначала — пусть средство поработает' : (moved ? 'Переходим: ' : '') + esc(zname(step.zone))}</div>
       <div class="s-text pop">${esc(step.text)}</div>
+      ${w ? `<div class="s-why"><b>Даст:</b> ${esc(w[0])}</div>` : ''}
       ${step.kind === 'task' && t.hint ? `<div class="s-hint">${esc(t.hint)}</div>` : ''}
       ${step.kind === 'prep' ? `<div class="s-hint">Пока оно действует ${t.wait} мин, займёмся другим.</div>` : ''}
       ${kit.length ? `<div class="s-hint small">Понадобится: ${esc(kit.join(', ').toLowerCase())}</div>` : ''}
       ${t.warn ? `<div class="s-warn">${esc(t.warn)}</div>` : ''}
       ${waitLeft > 0 ? `<div class="s-wait">Средство ещё действует: <b id="wait-left">${mmss(waitLeft)}</b>${hasLater ? ' — можно вернуться к этому позже.' : ''}</div>` : ''}
-      <div class="s-timer"><span id="s-timer">${mmss(now() - ss.stepStart)}</span> из ~${step.min} мин</div>
+      ${w ? `<div class="s-why skip">Если пропустить: ${esc(w[1])}</div>` : ''}
+      <div class="s-timer" id="s-timer">${timerText(step)}</div>
     </div>
     <div class="s-actions">
       <button class="btn primary" data-act="s-done">${step.kind === 'prep' ? 'Нанесено' : 'Готово'}</button>
       <button class="btn" data-act="s-later" ${hasLater ? '' : 'disabled'}>Позже</button>
       <button class="btn ghost" data-act="s-skip">Пропустить</button>
+      <button class="link" data-act="s-stop">Хватит на сегодня</button>
     </div>`);
 
   clearInterval(tick);
   tick = setInterval(() => {
     const tm = $('#s-timer');
-    if (tm) tm.textContent = mmss(now() - ss.stepStart);
+    if (tm) tm.innerHTML = timerText(step);
     const wl = $('#wait-left');
     if (wl) {
       const rest = prepAt + t.wait * 60000 - now();
@@ -792,8 +896,33 @@ function renderSession() {
   }, 1000);
 }
 
-function sessionAct(act) {
+// «1:20 из ~5 мин», а когда дольше оценки — спокойный отсчёт сверх неё.
+function timerText(step) {
+  const el = now() - st.session.stepStart;
+  const est = step.min * 60000;
+  if (el <= est) return `${mmss(el)} из ~${step.min} мин`;
+  return `~${step.min} мин и ещё <span class="over">+${mmss(el - est)}</span>`;
+}
+
+function openStepList() {
   const ss = st.session;
+  $('#sheet').innerHTML = `<h2>Все шаги</h2>
+    <div class="mut small">Нажмите на шаг, чтобы перейти к нему</div>
+    <ul class="tl steps">${ss.steps
+      .map((x, i) => {
+        const done = x.kind === 'task' && ss.doneIds[x.id];
+        const mark = done ? '✓' : i === ss.idx ? '●' : x.kind === 'prep' && ss.prepAt[x.id] ? '✓' : '○';
+        return `<li class="${done ? 'is-done' : ''} ${i === ss.idx ? 'cur' : ''}"><span class="mark">${mark}</span>
+          <button class="tt" data-act="s-jump" data-i="${i}">${esc(x.text)}<small>${x.kind === 'prep' ? 'подготовка' : esc(zname(x.zone))} · ~${x.min} мин</small></button></li>`;
+      })
+      .join('')}</ul>`;
+  openSheetEl();
+}
+
+function sessionAct(act, el) {
+  const ss = st.session;
+  ss.doneIds = ss.doneIds || {};
+  ss.mins = ss.mins || {};
   const step = ss.steps[ss.idx];
   cheer = '';
   if (act === 's-sound') {
@@ -801,6 +930,15 @@ function sessionAct(act) {
     const b = $('.sound');
     if (b) b.outerHTML = soundBtn();
     return;
+  }
+  if (act === 's-list') return openStepList();
+  if (act === 's-pause') {
+    if (ss.pausedAt) {
+      ss.stepStart += now() - ss.pausedAt; // пауза не считается во время шага
+      ss.pausedAt = null;
+    } else ss.pausedAt = now();
+    commit();
+    return renderSession();
   }
   if (act === 's-go') {
     ss.ready = true;
@@ -816,9 +954,13 @@ function sessionAct(act) {
     if (step.kind === 'prep') {
       ss.prepAt[step.id] = now();
     } else {
+      // Замер таймера учит приложение. Если шаг затянулся втрое — скорее отвлеклись, пишем оценку.
       const spent = (now() - ss.stepStart) / 60000;
-      const min = Math.max(1, Math.round(spent > step.min * 2 ? step.min : spent));
-      L.complete(st, step.id, now(), min);
+      const real = spent <= step.min * 3;
+      const min = real ? Math.max(0.5, Math.round(spent * 10) / 10) : step.min;
+      L.complete(st, step.id, now(), min, real);
+      ss.doneIds[step.id] = true;
+      ss.mins[step.id] = min;
       ss.done++;
       ss.min += min;
       ss.zones.push(step.zone);
@@ -826,12 +968,26 @@ function sessionAct(act) {
     }
     buzz(30);
     ss.idx++;
+  } else if (act === 's-next') {
+    ss.idx++;
+  } else if (act === 's-back') {
+    if (ss.idx > 0) ss.idx--;
+  } else if (act === 's-jump') {
+    ss.idx = Number(el.dataset.i);
+    closeSheet();
+  } else if (act === 's-unmark') {
+    L.undoComplete(st, step.id);
+    delete ss.doneIds[step.id];
+    ss.done--;
+    ss.min -= ss.mins[step.id] || 0;
+    ss.zones.splice(ss.zones.lastIndexOf(step.zone), 1);
   } else if (act === 's-later') {
     ss.steps.push(ss.steps.splice(ss.idx, 1)[0]);
   } else if (act === 's-skip') {
     ss.idx++;
   } else if (act === 's-stop') {
-    ss.steps = ss.steps.slice(0, ss.idx);
+    ss.pausedAt = null;
+    ss.idx = ss.steps.length;
   } else if (act === 's-close') {
     st.session = null;
     ambient.stop();
@@ -840,6 +996,10 @@ function sessionAct(act) {
     renderSession();
     render();
     return;
+  }
+  // Пропускаем уже сделанные шаги при движении вперёд — возвращаться к ним можно кнопкой «‹».
+  if (act === 's-done' || act === 's-skip' || act === 's-next') {
+    while (ss.idx < ss.steps.length && ss.steps[ss.idx].kind === 'task' && ss.doneIds[ss.steps[ss.idx].id]) ss.idx++;
   }
   ss.stepStart = now();
   commit();
@@ -875,7 +1035,7 @@ document.addEventListener('click', (e) => {
   if (!el || el.tagName === 'INPUT') return;
   const { act, id } = el.dataset;
 
-  if (act.startsWith('s-')) return sessionAct(act);
+  if (act.startsWith('s-')) return sessionAct(act, el);
   switch (act) {
     case 'kit':
       return el.classList.toggle('got');
@@ -984,14 +1144,12 @@ document.addEventListener('click', (e) => {
       el.classList.add('done');
       markDone(id);
       return setTimeout(render, 250);
-    case 'undo-today': {
-      // Повторное нажатие на отмеченную сегодня мелочь — снять отметку.
-      const i = st.log.map((x) => x.id).lastIndexOf(id);
-      const prevAt = [...st.log.slice(0, i)].reverse().find((x) => x.id === id)?.at;
-      L.undoComplete(st, id, prevAt);
+    case 'undo-today':
+      // Повторное нажатие на отмеченное сегодня дело — снять отметку.
+      L.undoComplete(st, id);
       commit();
+      toast('Отметка снята');
       return render();
-    }
     case 'done-yday':
       closeSheet();
       markDone(id, now() - L.DAY);
@@ -1012,8 +1170,11 @@ document.addEventListener('click', (e) => {
       else delete st.every[id];
       commit();
       openSheet(id);
-      return render();
+      render();
+      return toast(`Сохранено: ${L.fmtEvery(L.effEvery(L.task(st, id), st))}`);
     }
+    case 'sheet-close':
+      return closeSheet();
     case 'pause-off':
       L.endPause(st, now());
       commit();
@@ -1063,6 +1224,11 @@ document.addEventListener('change', (e) => {
 
 // Имя питомца сохраняем по мере ввода, без перерисовки.
 document.addEventListener('input', (e) => {
+  if (e.target.dataset.act === 'buddy-name') {
+    st.buddy = e.target.value.trim();
+    commit();
+    return;
+  }
   if (e.target.dataset.act === 'search') {
     query = e.target.value;
     $('#zones').innerHTML = zonesHtml();

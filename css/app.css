@@ -274,6 +274,55 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .toast.top { bottom: auto; top: calc(56px + var(--safe-t)); }
 .toast button { color: #8a5a22; font-weight: 700; }
 
+/* Домовёнок */
+.buddy { display: flex; align-items: flex-end; gap: 10px; margin: 14px 0 0; text-align: left; }
+.mascot { width: 56px; height: 56px; flex: none; overflow: visible; animation: bob 3.2s ease-in-out infinite; }
+.mascot .body { fill: #c9a27a; }
+.mascot .hair { fill: #8b5e3c; }
+.mascot .tuft, .mascot .arm { fill: none; stroke: #8b5e3c; stroke-width: 3; stroke-linecap: round; }
+.mascot .ink { fill: #2a1f14; }
+.mascot .shine { fill: #fff; }
+.mascot .line { fill: none; stroke: #2a1f14; stroke-width: 2.2; stroke-linecap: round; }
+.mascot .cheek { fill: rgba(236, 142, 120, .5); }
+.mascot.cheer { animation: hop .7s ease-in-out 3; }
+.mascot.sleepy { animation: none; }
+@keyframes bob { 50% { transform: translateY(-2px); } }
+@keyframes hop { 50% { transform: translateY(-7px); } }
+.bubble {
+  position: relative; background: var(--card2); border: 1px solid var(--line); border-radius: 16px 16px 16px 4px;
+  padding: 8px 12px; font-size: 14px; line-height: 1.4; color: var(--txt);
+}
+.bubble b { display: block; font-size: 12px; color: var(--acc); font-weight: 600; }
+.finish .buddy { justify-content: center; margin: 4px 0 10px; }
+.cheer .buddy { margin: 0 0 4px; }
+.cheer .mascot { width: 44px; height: 44px; }
+
+/* Режим уборки: навигация, пауза, польза */
+.icon-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); color: var(--mut); font-size: 18px; display: grid; place-items: center; }
+.icon-btn:disabled { opacity: .3; }
+.icon-btn.on { color: var(--acc); border-color: var(--acc); background: var(--acc-soft); }
+button.s-prog { width: 100%; padding: 8px 0; }
+.s-prog i.passed { background: var(--dim); }
+.s-why { font-size: 15px; color: var(--txt); }
+.s-why b { color: var(--ok); font-weight: 600; }
+.s-why.skip { font-size: 13px; color: var(--dim); }
+.over { color: var(--acc); }
+.link { grid-column: 1 / -1; padding: 6px 0 0; color: var(--dim); font-size: 14px; }
+.tl.steps li.cur .tt { color: var(--acc); }
+.tl.steps li.is-done .tt { color: var(--mut); text-decoration: line-through; text-decoration-color: var(--dim); }
+.tl.steps .mark { width: 20px; text-align: center; color: var(--mut); flex: none; }
+.tl li.is-done .tt { color: var(--mut); }
+
+/* Карточка дела */
+.sheet { position: fixed; }
+.sheet-x { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: 50%; color: var(--mut); font-size: 24px; }
+.sheet h2 { padding-right: 40px; }
+.why-box { background: var(--card2); border-radius: 14px; padding: 10px 12px; margin-top: 12px; font-size: 14px; }
+.why-box p { margin: 0; }
+.why-box p + p { margin-top: 6px; }
+.why-box b { color: var(--ok); font-weight: 600; }
+.why-box .mut b { color: var(--mut); }
+
 @keyframes up { from { transform: translateY(16px); opacity: 0; } }
 @keyframes toastUp { from { transform: translate(-50%, 16px); opacity: 0; } }
 .pop { animation: pop .3s ease; }
