@@ -324,3 +324,22 @@ test('день для мелочей начинается в 4 утра', () => 
   assert.equal(L.currentRitual(night), 'evening');
   assert.equal(L.currentRitual(morning), 'morning');
 });
+
+test('оценка дела: «слишком часто» сдвигает частоту на шаг, «не про нас» убирает, оценка сохраняется', () => {
+  const st = fresh();
+  assert.equal(L.rateTask(st, 'b-mirror', 'often', 'Игорь', NOW), 14);
+  assert.equal(L.effEvery(L.task(st, 'b-mirror'), st), 14);
+  assert.equal(L.rateTask(st, 'k-micro', 'rare', 'Маша', NOW), 3);
+  L.rateTask(st, 'l-plants', 'no', 'Маша', NOW);
+  assert.ok(st.taskOff['l-plants']);
+  L.rateTask(st, 's-bed', 'ok', 'Игорь', NOW);
+  assert.deepEqual(Object.keys(st.fb).sort(), ['b-mirror', 'k-micro', 'l-plants', 's-bed']);
+  assert.equal(st.fb['k-micro'].by, 'Маша');
+});
+
+test('сброс с выбором «давно» показывает честную картину, а не «всё уютно»', () => {
+  const st = fresh();
+  L.resetMarks(st, NOW);
+  L.startFrom(st, NOW, 2);
+  assert.ok(L.homeHealth(st, NOW) < 0.6);
+});

@@ -517,6 +517,7 @@ function openSheet(id) {
     <div class="mut small">${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
     ${w ? `<div class="why-box"><p><b>Даст:</b> ${esc(w[0])}</p><p class="mut"><b>Если пропустить:</b> ${esc(w[1])}</p></div>` : ''}
     ${usual}
+    ${rateChips(t)}
     ${t.prep ? `<p class="small"><b>Сначала:</b> ${esc(L.label(t, st, t.prep))} — и ${t.wait} мин пусть действует.</p>` : ''}
     ${t.hint ? `<p class="small mut">${esc(t.hint)}</p>` : ''}
     ${kit.length ? `<p class="small mut">Понадобится: ${esc(kit.join(', ').toLowerCase())}</p>` : ''}
@@ -787,6 +788,18 @@ function homeSection() {
     </div>`;
 }
 
+function openResetSheet() {
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>Какой дом сейчас?</h2>
+    <p class="small mut">Чтобы после сброса приложение показало честную картину.${S.shared ? ' Сброс общий — отметки обнулятся у всех в доме.' : ''}</p>
+    <div class="stack">
+      <button class="btn wide opt" data-act="reset-ago" data-v="0">Только что убрались — порядок</button>
+      <button class="btn wide opt" data-act="reset-ago" data-v="1">Убирались неделю-две назад</button>
+      <button class="btn wide opt" data-act="reset-ago" data-v="2">Давно — кое-что накопилось</button>
+    </div>`;
+  openSheetEl();
+}
+
 function openPairSheet() {
   $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
     <h2>Общий дом</h2>
@@ -882,6 +895,19 @@ function renderOwnForm() {
       ${f.id ? '<button class="btn wide ghost" data-act="own-del">Удалить дело</button>' : ''}
     </div>`;
   openSheetEl();
+}
+
+const RATE = [
+  ['ok', 'Норм'],
+  ['often', 'Слишком часто'],
+  ['rare', 'Слишком редко'],
+  ['no', 'Не про нас'],
+];
+
+function rateChips(t) {
+  const cur = st.fb[t.id] && st.fb[t.id].v;
+  return `<div class="sec-title">Как вам это дело?</div>
+    <div class="chips">${RATE.map(([v, n]) => `<button class="chip ${cur === v ? 'on' : ''}" data-act="rate" data-id="${t.id}" data-v="${v}">${n}</button>`).join('')}</div>`;
 }
 
 function whenChips(t) {
@@ -1157,7 +1183,10 @@ function renderSession() {
         ${step.kind === 'task' ? '<button class="btn" data-act="s-already">Уже сделано</button>' : ''}
         <button class="btn ghost" data-act="s-skip">Пропустить</button>
       </div>
-      <button class="link" data-act="s-stop">Хватит на сегодня</button>
+      <div class="s-links">
+        ${step.kind === 'task' ? '<button class="link" data-act="task" data-id="' + step.id + '">Оценить дело</button>' : ''}
+        <button class="link" data-act="s-stop">Хватит на сегодня</button>
+      </div>
     </div>`);
 
   clearInterval(tick);
@@ -1439,9 +1468,13 @@ document.addEventListener('click', (e) => {
       return render();
     case 'reset-marks':
       if (!arm('reset-marks')) return render();
+      return openResetSheet();
+    case 'reset-ago':
       L.resetMarks(st, now());
+      L.startFrom(st, now(), Number(el.dataset.v));
       commit();
-      toast('Отметки сброшены — начинаем с чистого листа');
+      closeSheet();
+      toast('Отметки сброшены');
       return render();
     case 'notes-copy':
       return copyNotes();
@@ -1490,6 +1523,21 @@ document.addEventListener('click', (e) => {
       openSheet(id);
       render();
       return toast(`Сохранено: ${L.fmtEvery(L.effEvery(L.task(st, id), st))}`);
+    }
+    case 'rate': {
+      const t = L.task(st, id);
+      const v = el.dataset.v;
+      const f = L.rateTask(st, id, v, S.me, now());
+      commit();
+      if (v === 'no') {
+        closeSheet();
+        toast('Убрали из списка — вернуть можно в Настройках');
+      } else {
+        openSheet(id);
+        toast(v === 'ok' ? 'Спасибо, учту' : `Теперь ${L.fmtEvery(f)}`);
+      }
+      if (st.session) renderSession();
+      return render();
     }
     case 'sheet-close':
       return closeSheet();

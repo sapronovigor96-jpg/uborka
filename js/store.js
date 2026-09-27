@@ -12,7 +12,7 @@ import { normalize } from './logic.js';
 import { makeHttpDb } from './remote.js';
 
 const KEY = 'uborka.v1';
-const SHARED = ['v', 'created', 'zonesOn', 'taskOff', 'every', 'household', 'merged', 'custom', 'when', 'remind', 'buddy', 'setup', 'pause', 'notes'];
+const SHARED = ['v', 'created', 'zonesOn', 'taskOff', 'every', 'household', 'merged', 'custom', 'when', 'remind', 'buddy', 'setup', 'pause', 'notes', 'fb'];
 const LOG_MONTHS = 3; // сколько месяцев журнала держать в памяти
 
 export let persistent = true;

@@ -38,8 +38,8 @@ export const TASKS = [
   { id: 'k-towels', z: 'kitchen', t: 'Полотенца и прихватки — в стирку', every: 3, min: 1, ord: 0 },
   { id: 'k-dishes', z: 'kitchen', t: 'Посуда', every: 1, min: 10, ord: 1, when: 'evening', tags: ['hyg'], hint: 'В посудомойку или вымыть, сушилку освободить.' },
   { id: 'k-top', z: 'kitchen', t: 'Верх шкафов и вытяжка снаружи', every: 14, min: 5, ord: 4, tags: ['dust'] },
-  { id: 'k-fronts', z: 'kitchen', t: 'Фасады шкафов и ручки', every: 7, min: 5, ord: 5, hint: 'Жирные отпечатки — обезжиривателем.' },
-  { id: 'k-appliances', z: 'kitchen', t: 'Техника снаружи', every: 7, min: 5, ord: 6, hint: 'Холодильник, чайник, духовка, кофемашина.' },
+  { id: 'k-fronts', z: 'kitchen', t: 'Фасады шкафов и ручки', every: 14, min: 5, ord: 5, hint: 'Жирные отпечатки — обезжиривателем.' },
+  { id: 'k-appliances', z: 'kitchen', t: 'Техника снаружи', every: 14, min: 5, ord: 6, hint: 'Холодильник, чайник, духовка, кофемашина.' },
   { id: 'k-fridge', z: 'kitchen', t: 'Холодильник: выбросить просрочку, протереть полки', every: 30, min: 20, ord: 6, hint: 'Вода с содой, без запахов химии.' },
   {
     id: 'k-micro', kit: ['Миска', 'Лимон'], z: 'kitchen', t: 'Микроволновка внутри', every: 7, min: 3, ord: 7, wait: 5,
@@ -69,7 +69,7 @@ export const TASKS = [
   { id: 'k-floor', z: 'kitchen', t: 'Пол на кухне', every: 7, min: 7, ord: 20, tags: ['floor'] },
 
   // Ванная и туалет
-  { id: 'b-sink-quick', z: 'bath', t: 'Раковина в ванной — сполоснуть и протереть насухо', every: 1, min: 2, ord: 1, when: 'morning' },
+  { id: 'b-sink-quick', z: 'bath', t: 'Раковина в ванной — сполоснуть и протереть насухо', every: 2, min: 2, ord: 1, when: 'morning' },
   { id: 'b-towels', z: 'bath', t: 'Полотенца — в стирку', every: 4, min: 1, ord: 0, tags: ['hyg'], hint: '60 °C. Кондиционера поменьше — от него полотенца хуже впитывают.' },
   { id: 'b-mat', z: 'bath', t: 'Коврик — в стирку', every: 7, min: 1, ord: 0 },
   { id: 'b-trash', z: 'bath', t: 'Мусорное ведро в ванной', every: 7, min: 2, ord: 0 },
@@ -114,7 +114,7 @@ export const TASKS = [
   // Гостиная
   { id: 'l-tidy', z: 'living', t: 'Вещи на места, подушки, плед', every: 1, min: 5, ord: 1, when: 'evening', hint: 'Всё чужое — в одну корзину и разнести за один проход.' },
   { id: 'l-dust', z: 'living', t: 'Пыль: углы потолка, полки, техника, подоконник', every: 7, min: 7, ord: 2, tags: ['dust'], hint: 'Экран ТВ — только сухой микрофиброй.' },
-  { id: 'l-touch', z: 'living', t: 'Пульты, выключатели, ручки', every: 7, min: 2, ord: 4 },
+  { id: 'l-touch', z: 'living', t: 'Пульты, выключатели, ручки', every: 14, min: 2, ord: 4 },
   { id: 'l-plants', z: 'living', t: 'Цветы: полить, протереть листья', every: 7, min: 5, ord: 4 },
   { id: 'l-windows', z: 'living', t: 'Окна изнутри', every: 30, min: 15, ord: 3, hint: 'Не на солнце — останутся разводы.' },
   { id: 'l-sofa', z: 'living', t: 'Мягкая мебель — пылесосом', every: 30, min: 15, ord: 5, tags: ['dust'] },
@@ -126,7 +126,7 @@ export const TASKS = [
 
   // Прихожая
   { id: 'h-shoes', z: 'hall', t: 'Обувь на полку', every: 1, min: 1, ord: 1, when: 'evening' },
-  { id: 'h-mirror', z: 'hall', t: 'Зеркало, ручки, звонок, выключатели', every: 7, min: 3, ord: 3 },
+  { id: 'h-mirror', z: 'hall', t: 'Зеркало, ручки, звонок, выключатели', every: 14, min: 3, ord: 3 },
   { id: 'h-mat', z: 'hall', t: 'Коврик у двери — вытряхнуть', every: 7, min: 2, ord: 5 },
   { id: 'h-door', z: 'hall', t: 'Входная дверь целиком', every: 30, min: 10, ord: 4 },
   { id: 'h-shoerack', z: 'hall', t: 'Полка для обуви внутри', every: 30, min: 10, ord: 4 },

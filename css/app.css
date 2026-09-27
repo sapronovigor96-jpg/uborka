@@ -324,6 +324,7 @@ button.s-prog { width: 100%; padding: 8px 0; }
 .s-why b { color: var(--ok); font-weight: 600; }
 .s-why.skip { font-size: 13px; color: var(--dim); }
 .over { color: var(--acc); }
+.s-links { grid-column: 1 / -1; display: flex; justify-content: center; gap: 24px; }
 .link { grid-column: 1 / -1; padding: 6px 0 0; color: var(--dim); font-size: 14px; }
 .tl.steps li.cur .tt { color: var(--acc); }
 .tl.steps li.is-done .tt { color: var(--mut); text-decoration: line-through; text-decoration-color: var(--dim); }

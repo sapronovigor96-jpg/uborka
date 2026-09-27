@@ -33,6 +33,7 @@ export function initState(now) {
     when: {}, // перенос ежедневных мелочей: { taskId: 'morning' | 'evening' }
     remind: defaultRemind(),
     notes: [], // «что неудобно»: { id, at, text, ctx, done }
+    fb: {}, // оценки дел: { taskId: { v: 'ok'|'often'|'rare'|'no', by, at } }
     setup: false, // знакомство с домом пройдено
     pause: null,
   };
@@ -365,6 +366,7 @@ export function normalize(raw, now) {
     when: raw.when || {},
     remind: { ...defaultRemind(), ...(raw.remind || {}) },
     notes: Array.isArray(raw.notes) ? raw.notes : [],
+    fb: raw.fb && typeof raw.fb === 'object' ? raw.fb : {},
     last: raw.last || {},
     log: Array.isArray(raw.log) ? raw.log : [],
     zonesOn: raw.zonesOn || {},
@@ -583,4 +585,19 @@ export function resetMarks(st, now) {
   st.session = null;
   st.created = now;
   for (const c of st.custom || []) c.soon = false;
+}
+
+// ---------- оценка дела жильцом ----------
+// «Слишком часто» / «слишком редко» сразу сдвигают частоту на шаг, «не про нас» убирает дело.
+// Сама оценка остаётся в fb — по ней Claude потом пересматривает список.
+export const FREQ_STEPS = [1, 2, 3, 7, 14, 30, 60, 90, 180, 365];
+
+export function rateTask(st, id, v, by, now) {
+  const t = task(st, id);
+  st.fb[id] = { v, by: by || '', at: now };
+  const cur = effEvery(t, st);
+  if (v === 'often') st.every[id] = FREQ_STEPS.find((f) => f > cur) || 365;
+  if (v === 'rare') st.every[id] = [...FREQ_STEPS].reverse().find((f) => f < cur) || 1;
+  if (v === 'no') st.taskOff[id] = true;
+  return st.every[id];
 }

@@ -6,6 +6,7 @@
 //   node tools/home.mjs get <path>        — показать документ
 //   node tools/home.mjs patch <path> <json>  — слить поля в документ
 //   node tools/home.mjs docs              — список документов
+//   node tools/home.mjs ratings           — оценки дел жильцами
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -42,6 +43,12 @@ async function main() {
     const shown = a === 'all' ? msgs : msgs.filter((m) => m.role === 'user' && m.status !== 'answered');
     if (!shown.length) console.log('Новых сообщений нет.');
     for (const m of shown) console.log(`[${m.id}] ${time(m.at)} ${m.role === 'claude' ? 'Claude' : m.by || 'жилец'}${m.ctx ? ' · ' + m.ctx : ''}${m.status ? ' · ' + m.status : ''}\n  ${m.text}`);
+  } else if (cmd === 'ratings') {
+    const st = (await docs()).find((x) => x.path === 'home/state');
+    const fb = (st && st.data.fb) || {};
+    const names = { ok: 'норм', often: 'слишком часто', rare: 'слишком редко', no: 'не про нас' };
+    if (!Object.keys(fb).length) console.log('Оценок пока нет.');
+    for (const [id, r] of Object.entries(fb).sort((a, b) => b[1].at - a[1].at)) console.log(time(r.at), (r.by || '?').padEnd(8), id.padEnd(16), names[r.v] || r.v);
   } else if (cmd === 'reply') {
     const text = rest.join(' ').trim();
     if (!a || !text) throw new Error('нужно: reply <id> <текст>');
