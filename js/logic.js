@@ -205,7 +205,7 @@ export function priority(t, u) {
 }
 
 export function dueTasks(st, now, minUrg = DUE) {
-  return myTasks(st)
+  return activeTasks(st)
     .map((t) => ({ t, u: urgency(t, st, now) }))
     .filter((x) => x.u >= minUrg)
     .sort((a, b) => priority(b.t, b.u) - priority(a.t, a.u) || a.t.min - b.t.min);
@@ -224,7 +224,8 @@ const SAME_ROOM = 0.35;
 
 // zone — уборка только одной комнаты.
 export function buildSession(st, now, budget, minUrg = DUE, zone = null) {
-  const pool = dueTasks(st, now, Math.min(minUrg, AHEAD)).filter((x) => !zone || zoneOf(x.t, st) === zone);
+  // Список общий, но дело, которое взял другой, в мою уборку не попадает.
+  const pool = dueTasks(st, now, Math.min(minUrg, AHEAD)).filter((x) => mine(x.t, st) && (!zone || zoneOf(x.t, st) === zone));
   const picked = [];
   const rooms = new Set();
   let used = 0;
@@ -452,7 +453,7 @@ export function whenOf(t, st) {
 }
 
 export function dailyTasks(st) {
-  return myTasks(st).filter((t) => effEvery(t, st) <= 1);
+  return activeTasks(st).filter((t) => effEvery(t, st) <= 1);
 }
 
 // «День» для мелочей начинается в 4 утра: вечер, закончившийся после полуночи, — всё ещё вчерашний.
@@ -469,7 +470,7 @@ export function ritual(st, which) {
 
 // Шаги ритуала — только то, что сегодня ещё не сделано, в порядке профи.
 export function ritualSteps(st, which, now) {
-  return orderSteps(ritual(st, which).filter((t) => !sameDay(st.last[t.id], now)), st).filter((x) => x.kind === 'task');
+  return orderSteps(ritual(st, which).filter((t) => mine(t, st) && !sameDay(st.last[t.id], now)), st).filter((x) => x.kind === 'task');
 }
 
 // Какой ритуал сейчас уместнее: до 14:00 — утро, потом — вечер.

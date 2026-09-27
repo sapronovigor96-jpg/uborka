@@ -346,7 +346,7 @@ function renderNow() {
       .map((x) => {
         const done = doneToday(x.id);
         return `<li class="${done ? 'is-done' : ''}"><button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${x.id}" aria-label="Сделано">✓</button>
-          <button class="tt" data-act="task" data-id="${x.id}">${esc(tname(x))}<small>${esc(zname(L.zoneOf(x, st)))} · ${x.min} мин</small></button></li>`;
+          <button class="tt" data-act="task" data-id="${x.id}">${esc(tname(x))}<small>${esc(zname(L.zoneOf(x, st)))} · ${x.min} мин${whoTag(x)}</small></button></li>`;
       })
       .join('')}</ul>
       ${oList.length ? `<button class="more" data-act="ritual-switch" data-w="${other}">${eveningDone && other === 'morning' ? 'Утренние мелочи — завтра →' : `${RITUAL[other]}: ${oDone} из ${oList.length} →`}</button>` : ''}</div>` : ''}
@@ -368,7 +368,7 @@ function taskRow(t, showZone) {
   return `<li class="${done ? 'is-done' : ''}">
     <span class="dot ${done ? '' : dotClass(u)}"></span>
     <button class="tt" data-act="task" data-id="${t.id}">${esc(tname(t))}
-      <small>${showZone ? esc(zname(L.zoneOf(t, st))) + ' · ' : ''}${taskMeta(t)}${st.assign[t.id] ? ' · ' + esc(st.assign[t.id] === S.me ? 'моё' : st.assign[t.id]) : ''}</small></button>
+      <small>${showZone ? esc(zname(L.zoneOf(t, st))) + ' · ' : ''}${taskMeta(t)}${whoTag(t)}</small></button>
     <button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${t.id}" aria-label="${done ? 'Снять отметку' : 'Сделано'}">✓</button>
   </li>`;
 }
@@ -1165,11 +1165,17 @@ function people() {
   return [...set].filter(Boolean);
 }
 
+// Кто взял дело из общего списка
+function whoTag(t) {
+  const who = S.shared && st.assign[t.id];
+  return who ? ' · ' + (who === S.me ? 'беру я' : 'берёт ' + esc(who)) : '';
+}
+
 function assignChips(t) {
   if (!S.shared) return '';
   const cur = st.assign[t.id] || '';
-  return `<div class="sec-title">Чьё дело</div>
-    <div class="chips">${[['', 'Общее'], ...people().map((p) => [p, p])]
+  return `<div class="sec-title">Кто возьмёт</div>
+    <div class="chips">${[['', 'Пока никто'], ...people().map((p) => [p, p])]
       .map(([v, n]) => `<button class="chip ${cur === v ? 'on' : ''}" data-act="assign" data-id="${t.id}" data-v="${esc(v)}">${esc(n)}</button>`)
       .join('')}</div>`;
 }

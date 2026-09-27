@@ -376,18 +376,19 @@ test('счёт недели: дела и оценённые «сверх спи�
   assert.deepEqual(board.map((r) => [r.by, r.pts]), [['Маша', 23], ['Игорь', 11]]);
 });
 
-test('распределение: дело Маши не попадает в мои списки, общее — попадает, в доме видно всё', () => {
+test('общий список: дело, которое взяла Маша, видно всем, но в мою уборку и шаги не попадает', () => {
   const st = fresh();
   L.startFrom(st, NOW, 2);
   st.assign['k-trash'] = 'Маша';
   st._me = 'Игорь';
-  assert.ok(!L.dueTasks(st, NOW).some((x) => x.t.id === 'k-trash'));
-  assert.ok(L.activeTasks(st).some((t) => t.id === 'k-trash'));
+  assert.ok(L.dueTasks(st, NOW).some((x) => x.t.id === 'k-trash'), 'в списке видно');
+  assert.ok(!L.buildSession(st, NOW, 999).some((x) => x.id === 'k-trash'), 'в мою уборку не берётся');
   st._me = 'Маша';
-  assert.ok(L.dueTasks(st, NOW).some((x) => x.t.id === 'k-trash'));
+  assert.ok(L.buildSession(st, NOW, 999).some((x) => x.id === 'k-trash'), 'у Маши берётся');
   st.assign['s-cups'] = 'Маша';
   st._me = 'Игорь';
-  assert.ok(!L.ritual(st, 'evening').some((t) => t.id === 's-cups'));
+  assert.ok(L.ritual(st, 'evening').some((t) => t.id === 's-cups'), 'в ритуале видно');
+  assert.ok(!L.ritualSteps(st, 'evening', NOW).some((x) => x.id === 's-cups'), 'по шагам — не мне');
 });
 
 test('составные дела разделены: в названии одно действие', () => {
