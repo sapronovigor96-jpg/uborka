@@ -142,6 +142,8 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .search { margin: 14px 0 16px; }
 .inbox-btn { margin-top: 14px; }
 .inbox-list { margin-top: 14px; }
+.bar.mini { display: block; height: 4px; margin-top: 6px; }
+.tl.projects .tt { width: 100%; }
 .house .win.fresh .win-lit { animation: fresh 1.6s ease-in-out 3; }
 @keyframes fresh { 50% { opacity: .35; } }
 .budgets.three { grid-template-columns: repeat(3, 1fr); }
@@ -363,3 +365,7 @@ a.btn.primary { color: var(--acc-ink); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+.confetti i { position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px; animation: fall 1.6s ease-in forwards; }
+@keyframes fall { to { transform: translateY(105vh) rotate(540deg); opacity: .6; } }

@@ -11,6 +11,8 @@
 //   node tools/home.mjs add-task <inboxId> <json> — добавить настроенное дело в дом и закрыть входящее
 //        json: { z, t, every, min, when?, hint?, why?: [даст, если пропустить] }
 //   node tools/home.mjs inbox-skip <inboxId> <почему> — не добавлять, с пояснением
+//   node tools/home.mjs project-add <json>  — разовый проект { title, why?, steps: [текст, …] }
+//   node tools/home.mjs projects          — проекты и прогресс
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -73,6 +75,17 @@ async function main() {
   } else if (cmd === 'inbox-skip') {
     await api('PATCH', '/doc?path=inbox/' + a, { patch: { status: 'skip', note: rest.join(' ') } });
     console.log('отмечено');
+  } else if (cmd === 'project-add') {
+    const spec = JSON.parse([a, ...rest].join(' '));
+    const id = 'p' + Date.now().toString(36);
+    await api('PUT', '/doc?path=projects/' + id, {
+      data: { title: spec.title, why: spec.why || '', steps: spec.steps.map((t) => ({ t, done: false })), status: 'open', at: Date.now() },
+    });
+    console.log('проект добавлен:', id, spec.title);
+  } else if (cmd === 'projects') {
+    const ps = (await docs()).filter((d) => d.path.startsWith('projects/')).map((d) => ({ id: d.path.slice(9), ...d.data }));
+    if (!ps.length) console.log('Проектов нет.');
+    for (const p of ps) console.log(`[${p.id}] ${p.status === 'done' ? '✓' : '·'} ${p.title} — ${p.steps.filter((x) => x.done).length}/${p.steps.length}`);
   } else if (cmd === 'reply') {
     const text = rest.join(' ').trim();
     if (!a || !text) throw new Error('нужно: reply <id> <текст>');

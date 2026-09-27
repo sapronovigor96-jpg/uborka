@@ -381,6 +381,7 @@ function renderHome() {
   view.innerHTML = `<h1 class="page-title">Комнаты</h1>
     <p class="mut small">По порядку уборки — от дальней к выходу. Сделали что-то без приложения — найдите и отметьте.</p>
     <button class="btn wide inbox-btn" data-act="inbox-open">+ Дело во входящие${inboxWaiting() ? ` · ждут Claude: ${inboxWaiting()}` : ''}</button>
+    ${projectsHtml()}
     <input class="field search" id="search" data-act="search" type="search" placeholder="Найти дело: пол, лоток, окна…" value="${esc(query)}">
     <div id="zones">${zonesHtml()}</div>`;
 }
@@ -572,6 +573,11 @@ let chat = { msgs: [], can: 'off', thread: null, names: {}, open: false, sending
 async function startChat() {
   const db = S.database();
   if (!db) return;
+  db.collection('projects').orderBy('at').limit(50).onSnapshot((snap) => {
+    projects = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (tab === 'home' && !st.session) render();
+    if (projectOpen) renderProject(projectOpen);
+  });
   db.collection('inbox').orderBy('at').limit(50).onSnapshot((snap) => {
     inbox = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     if (tab === 'home' && !st.session) render();
@@ -814,6 +820,73 @@ async function saveInbox() {
   render();
 }
 
+function confetti() {
+  const box = document.createElement('div');
+  box.className = 'confetti';
+  const colors = ['#eab87f', '#a6c191', '#f6c97f', '#f2e8d9'];
+  for (let i = 0; i < 36; i++) {
+    const p = document.createElement('i');
+    p.style.left = Math.random() * 100 + 'vw';
+    p.style.background = colors[i % colors.length];
+    p.style.animationDelay = Math.random() * 0.5 + 's';
+    p.style.animationDuration = 1.2 + Math.random() * 0.9 + 's';
+    box.appendChild(p);
+  }
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 2800);
+}
+
+/* ---------- разовые проекты: сделали один раз — и готово ---------- */
+// В общем доме — projects/<id> { title, why, steps: [{ t, done }], status: 'open' | 'done', at }.
+// Проекты составляет Claude (tools/home.mjs project-add), жильцы отмечают шаги.
+
+let projects = [];
+let projectOpen = null;
+const projectList = () => (S.shared ? projects : st.projects || []);
+
+function projectsHtml() {
+  const open = projectList().filter((p) => p.status !== 'done');
+  const done = projectList().filter((p) => p.status === 'done');
+  if (!open.length && !done.length) return '';
+  const row = (p) => {
+    const n = p.steps.filter((x) => x.done).length;
+    return `<li><button class="tt" data-act="proj-open" data-id="${p.id}">${esc(p.title)}
+      <small>${n} из ${p.steps.length} шагов</small>
+      <span class="bar mini ${n === p.steps.length ? '' : 'mid'}"><i style="width:${Math.round((n / p.steps.length) * 100)}%"></i></span></button></li>`;
+  };
+  return `<div class="sec-title">Разовые проекты <span class="count">${done.length ? `готово: ${done.length}` : ''}</span></div>
+    <div class="card"><ul class="tl projects">${open.map(row).join('') || '<li class="mut small">Все проекты сделаны — вы молодцы.</li>'}</ul></div>`;
+}
+
+function renderProject(id) {
+  const p = projectList().find((x) => x.id === id);
+  if (!p) return closeSheet();
+  const n = p.steps.filter((x) => x.done).length;
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>${esc(p.title)}</h2>
+    ${p.why ? `<p class="small mut">${esc(p.why)}</p>` : ''}
+    <ul class="tl daily">${p.steps
+      .map((x, i) => `<li class="${x.done ? 'is-done' : ''}"><button class="check ${x.done ? 'done' : ''}" data-act="proj-step" data-id="${p.id}" data-i="${i}" aria-label="Шаг сделан">✓</button>
+        <span class="tt">${esc(x.t)}</span></li>`)
+      .join('')}</ul>
+    ${n === p.steps.length && p.status !== 'done' ? '<button class="btn wide primary" data-act="proj-done" data-id="' + p.id + '">Проект готов</button>' : ''}
+    ${p.status === 'done' ? '<p class="ok-note">✓ Проект готов</p>' : ''}`;
+}
+
+function openProject(id) {
+  projectOpen = id;
+  renderProject(id);
+  openSheetEl();
+}
+
+async function saveProject(p, patch) {
+  Object.assign(p, patch);
+  if (S.shared) await S.database().doc('projects/' + p.id).update(patch);
+  else commit();
+  renderProject(p.id);
+  render();
+}
+
 /* ---------- общий дом (телефонная версия) ---------- */
 
 function syncText(r) {
@@ -998,6 +1071,7 @@ function openSheetEl() {
 function closeSheet() {
   chat.open = false;
   inboxOpen = false;
+  projectOpen = null;
   $('#sheet').hidden = true;
   $('#sheet-bg').hidden = true;
 }
@@ -1497,6 +1571,20 @@ document.addEventListener('click', (e) => {
       S.disconnect();
       toast('Телефон отключён от общего дома');
       return setTimeout(() => location.reload(), 800);
+    case 'proj-open':
+      return openProject(id);
+    case 'proj-step': {
+      const p = projectList().find((x) => x.id === id);
+      const steps = p.steps.map((x, i) => (i === Number(el.dataset.i) ? { ...x, done: !x.done } : x));
+      buzz();
+      return saveProject(p, { steps });
+    }
+    case 'proj-done': {
+      const p = projectList().find((x) => x.id === id);
+      confetti();
+      toast('Проект готов — дом стал легче');
+      return saveProject(p, { status: 'done', doneAt: now() });
+    }
     case 'inbox-open':
       return openInbox();
     case 'inbox-save':
