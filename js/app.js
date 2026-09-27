@@ -274,7 +274,7 @@ function renderNow() {
   const oDone = oList.filter((x) => doneToday(x.id)).length;
   const due = L.dueTasks(st, t).filter((x) => L.effEvery(x.t, st) > 1);
   const wk = L.stats(st, t);
-  const lastAct = st.log.length ? st.log[st.log.length - 1].at : null;
+  const lastAct = st.log.length ? Math.max(...st.log.map((e) => e.at)) : null;
   const back = lastAct !== null && t - lastAct >= AWAY_DAYS * L.DAY && st.pause === null;
   const title = back
     ? 'С возвращением'
@@ -573,6 +573,11 @@ let chat = { msgs: [], can: 'off', thread: null, names: {}, open: false, sending
 async function startChat() {
   const db = S.database();
   if (!db) return;
+  db.collection('extra').orderBy('at').limit(300).onSnapshot((snap) => {
+    extras = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (tab === 'score' && !st.session) render();
+    if (extraOpen) renderExtra();
+  });
   db.collection('projects').orderBy('at').limit(50).onSnapshot((snap) => {
     projects = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     if (tab === 'home' && !st.session) render();
@@ -836,6 +841,122 @@ function confetti() {
   setTimeout(() => box.remove(), 2800);
 }
 
+/* ---------- очки и недельные итоги ---------- */
+// «Сверх списка» и бонусы — коллекция extra/<id>:
+//   { kind: 'extra' | 'bonus', text, min, by, at, status: 'pending' | 'rated', pts, note }
+// Дела сверх списка оценивает Claude (tools/home.mjs extra-rate), бонусы за новые дела начисляет он же.
+
+let extras = [];
+let extraOpen = false;
+const extraList = () => (S.shared ? extras : st.extra || []);
+const WEEK = 7 * L.DAY;
+
+function weekLabel(from) {
+  const f = new Date(from);
+  const t = new Date(from + WEEK - L.DAY);
+  const o = { day: 'numeric', month: 'long' };
+  return `${f.toLocaleDateString('ru', { day: 'numeric' })} – ${t.toLocaleDateString('ru', o)}`;
+}
+
+const who = (by) => (!by ? (S.shared ? 'Без имени' : 'Вы') : by === S.me ? by + ' (вы)' : by);
+
+function scoreLine(board, daysLeft) {
+  if (!board.length || board[0].pts === 0) return ['Неделя только началась — первое дело задаст темп.', 'calm'];
+  if (board.length === 1) return [`${board[0].pts} очков за неделю. Отличный темп!`, 'happy'];
+  const [a, b] = board;
+  const gap = a.pts - b.pts;
+  if (gap === 0) return ['Ничья! Кто сделает следующее дело — тот и впереди.', 'cheer'];
+  if (gap <= 10) return [`${a.by || 'Кто-то'} впереди всего на ${gap}. ${daysLeft > 1 ? 'Всё решится в последние дни!' : 'Решающий день!'}`, 'cheer'];
+  return [`${a.by || 'Кто-то'} впереди на ${gap}. ${b.by || 'Второй'}, пара вечерних мелочей — и догонишь.`, 'happy'];
+}
+
+function renderScore() {
+  const t = now();
+  const from = L.weekStart(t);
+  const board = L.scoreboard(st, extraList(), from, from + WEEK);
+  const top = board[0] ? board[0].pts : 0;
+  const daysLeft = Math.ceil((from + WEEK - t) / L.DAY);
+  const pending = extraList().filter((x) => x.kind !== 'bonus' && x.status === 'pending');
+  const rated = extraList().filter((x) => x.status === 'rated' && x.at >= from).sort((a, b) => b.at - a.at);
+  const past = [1, 2, 3, 4]
+    .map((k) => {
+      const f = from - k * WEEK;
+      const b = L.scoreboard(st, extraList(), f, f + WEEK).filter((r) => r.pts > 0);
+      return b.length ? { f, b } : null;
+    })
+    .filter(Boolean);
+
+  view.innerHTML = `<h1 class="page-title">Итоги недели</h1>
+    <p class="mut small">${weekLabel(from)} · ${daysLeft > 1 ? `до конца недели ${daysLeft} ${L.plural(daysLeft, 'день', 'дня', 'дней')}` : 'последний день недели'}</p>
+    ${say(...scoreLine(board, daysLeft))}
+    <div class="stack" style="margin-top:14px">${board.length
+      ? board
+          .map((r, i) => `<div class="card score ${i === 0 && r.pts > 0 && board.length > 1 ? 'lead' : ''}">
+            <div class="score-head"><b>${i === 0 && r.pts > 0 && board.length > 1 ? '♛ ' : ''}${esc(who(r.by))}</b><span class="pts">${r.pts}</span></div>
+            <div class="bar"><i style="width:${top ? Math.round((r.pts / top) * 100) : 0}%"></i></div>
+            <small class="mut">${dela(r.tasks)} · ${Math.round(r.minutes)} мин${r.extra ? ` · сверх списка и бонусы: ${r.extra}` : ''}</small>
+          </div>`)
+          .join('')
+      : '<div class="card mut small">Пока пусто. Отмечайте дела — очки появятся здесь.</div>'}</div>
+
+    <button class="btn wide primary" style="margin-top:14px" data-act="extra-open">+ Сделал сверх списка</button>
+
+    ${pending.length ? `<div class="sec-title">Ждут оценки Claude</div>
+      <div class="card"><ul class="tl">${pending.map((x) => `<li><span class="tt">${esc(x.text)}<small>${esc(who(x.by))} · ${x.min} мин</small></span></li>`).join('')}</ul></div>` : ''}
+    ${rated.length ? `<div class="sec-title">Сверх списка и бонусы</div>
+      <div class="card"><ul class="tl">${rated.map((x) => `<li><span class="tt">${esc(x.text)}<small>${esc(who(x.by))}${x.note ? ' · ' + esc(x.note) : ''}</small></span><b class="pts-sm">+${x.pts}</b></li>`).join('')}</ul></div>` : ''}
+
+    ${past.length ? `<div class="sec-title">Прошлые недели</div>
+      <div class="card"><ul class="tl">${past
+        .map(({ f, b }) => `<li><span class="tt">${weekLabel(f)}<small>${b.map((r) => `${esc(r.by || 'без имени')}: ${r.pts}`).join(' · ')}</small></span><b>${b.length > 1 && b[0].pts > b[1].pts ? '♛ ' + esc(b[0].by || '') : b.length > 1 ? 'ничья' : ''}</b></li>`)
+        .join('')}</ul></div>` : ''}
+
+    <details class="card rules"><summary class="small">Как считаются очки</summary>
+      <ul class="small mut">
+        <li>Дело из списка: минуты по оценке × сложность. Лёгкое ×1, грязное или с химией ×1,5, тяжёлое ×2.</li>
+        <li>«Уже сделано» — то, что сделали заодно, сверх плана: +25%.</li>
+        <li>Сверх списка — присылаете, что сделали и сколько минут, Claude оценивает.</li>
+        <li>Новое регулярное дело (через «Входящие» или сверх списка) — +${L.NEW_TASK_BONUS} автору.</li>
+        <li>Неделя — с понедельника 4:00 до следующего понедельника.</li>
+      </ul></details>`;
+}
+
+function renderExtra() {
+  const mine = extraList().filter((x) => x.kind !== 'bonus').sort((a, b) => b.at - a.at).slice(0, 10);
+  const draftMin = Number(($('.chip.on[data-act="extra-min"]') || {}).dataset?.v || 15);
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>Сделал сверх списка</h2>
+    <p class="small mut">Опишите, что сделали и сколько примерно заняло. Claude оценит очки и, если дело стоит делать регулярно, предложит добавить его в список (+${L.NEW_TASK_BONUS} за новое дело).</p>
+    <textarea class="field note-text" id="extra-text" rows="3" maxlength="400" placeholder="Например: разобрал балкон, вынес 3 пакета"></textarea>
+    <div class="sec-title">Сколько минут</div>
+    <div class="chips">${[5, 10, 15, 30, 45, 60, 90, 120].map((m) => `<button class="chip ${m === draftMin ? 'on' : ''}" data-act="extra-min" data-v="${m}">${m}</button>`).join('')}</div>
+    <button class="btn wide primary" style="margin-top:16px" data-act="extra-save">Отправить на оценку</button>
+    ${mine.length ? `<ul class="tl" style="margin-top:12px">${mine.map((x) => `<li class="${x.status === 'rated' ? 'is-done' : ''}"><span class="tt">${esc(x.text)}<small>${x.min} мин · ${x.status === 'rated' ? `+${x.pts}${x.note ? ' · ' + esc(x.note) : ''}` : 'ждёт Claude'}</small></span></li>`).join('')}</ul>` : ''}`;
+}
+
+function openExtra() {
+  extraOpen = true;
+  renderExtra();
+  openSheetEl();
+}
+
+async function saveExtra() {
+  const text = ($('#extra-text').value || '').trim();
+  if (!text) return;
+  const min = Number(($('.chip.on[data-act="extra-min"]') || {}).dataset?.v || 15);
+  const item = { kind: 'extra', text, min, by: S.me || '', at: now(), status: 'pending' };
+  const id = 'x' + now().toString(36);
+  if (S.shared) await S.database().collection('extra').doc(id).set(item);
+  else {
+    st.extra = [...(st.extra || []), { id, ...item }];
+    commit();
+  }
+  $('#extra-text').value = '';
+  toast('Отправлено — Claude оценит');
+  renderExtra();
+  render();
+}
+
 /* ---------- разовые проекты: сделали один раз — и готово ---------- */
 // В общем доме — projects/<id> { title, why, steps: [{ t, done }], status: 'open' | 'done', at }.
 // Проекты составляет Claude (tools/home.mjs project-add), жильцы отмечают шаги.
@@ -1072,6 +1193,7 @@ function closeSheet() {
   chat.open = false;
   inboxOpen = false;
   projectOpen = null;
+  extraOpen = false;
   $('#sheet').hidden = true;
   $('#sheet-bg').hidden = true;
 }
@@ -1083,7 +1205,8 @@ function markDone(id, at = now(), min) {
   L.complete(st, id, at, min ?? t.min);
   commit();
   buzz();
-  toast(`${pick(THANKS)} ${tname(t)}`, () => {
+  const last = st.log[st.log.length - 1];
+  toast(`${pick(THANKS)} ${tname(t)} · +${last ? L.entryPoints(st, last) : 0}`, () => {
     L.undoComplete(st, id);
     commit();
     render();
@@ -1403,7 +1526,7 @@ function sessionAct(act, el) {
       ss.done++;
       ss.min += min;
       ss.zones.push(step.zone);
-      cheer = pick(AFTER);
+      cheer = `${pick(AFTER)} · +${L.entryPoints(st, st.log[st.log.length - 1])}`;
     }
     buzz(30);
     ss.idx++;
@@ -1414,7 +1537,7 @@ function sessionAct(act, el) {
     ss.mins[step.id] = 0;
     ss.done++;
     ss.zones.push(step.zone);
-    cheer = 'Отлично, одним делом меньше';
+    cheer = `Отлично, одним делом меньше · +${L.entryPoints(st, st.log[st.log.length - 1])}`;
     ss.idx++;
   } else if (act === 's-next') {
     ss.idx++;
@@ -1465,6 +1588,7 @@ function render() {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   if (tab === 'now') renderNow();
   else if (tab === 'home') renderHome();
+  else if (tab === 'score') renderScore();
   else renderSettings();
 }
 
@@ -1571,6 +1695,13 @@ document.addEventListener('click', (e) => {
       S.disconnect();
       toast('Телефон отключён от общего дома');
       return setTimeout(() => location.reload(), 800);
+    case 'extra-open':
+      return openExtra();
+    case 'extra-min':
+      document.querySelectorAll('[data-act="extra-min"]').forEach((b) => b.classList.toggle('on', b === el));
+      return;
+    case 'extra-save':
+      return saveExtra();
     case 'proj-open':
       return openProject(id);
     case 'proj-step': {

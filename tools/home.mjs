@@ -13,6 +13,10 @@
 //   node tools/home.mjs inbox-skip <inboxId> <почему> — не добавлять, с пояснением
 //   node tools/home.mjs project-add <json>  — разовый проект { title, why?, steps: [текст, …] }
 //   node tools/home.mjs projects          — проекты и прогресс
+//   node tools/home.mjs extras            — «сверх списка», ждущие оценки
+//   node tools/home.mjs extra-rate <id> <очки> [пояснение] — оценить
+//   node tools/home.mjs bonus <имя> <очки> <за что>          — начислить бонус
+//   node tools/home.mjs score             — счёт текущей недели
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -70,7 +74,14 @@ async function main() {
     await api('PATCH', '/doc?path=home/state', { patch: { custom } });
     // Новое дело стартует с середины интервала: не горит сразу и не забывается.
     await api('PATCH', '/doc?path=home/last', { patch: { [id]: Date.now() - (spec.every / 2) * 86400000 } });
-    if (a && a !== '-') await api('PATCH', '/doc?path=inbox/' + a, { patch: { status: 'done', taskId: id } });
+    if (a && a !== '-') {
+      await api('PATCH', '/doc?path=inbox/' + a, { patch: { status: 'done', taskId: id } });
+      const item = (await docs()).find((x) => x.path === 'inbox/' + a);
+      if (item && item.data.by)
+        await api('PUT', '/doc?path=extra/b' + Date.now().toString(36), {
+          data: { kind: 'bonus', by: item.data.by, pts: 10, text: 'Новое дело: ' + spec.t, at: Date.now(), status: 'rated' },
+        });
+    }
     console.log('дело добавлено:', id, spec.t);
   } else if (cmd === 'inbox-skip') {
     await api('PATCH', '/doc?path=inbox/' + a, { patch: { status: 'skip', note: rest.join(' ') } });
@@ -86,6 +97,30 @@ async function main() {
     const ps = (await docs()).filter((d) => d.path.startsWith('projects/')).map((d) => ({ id: d.path.slice(9), ...d.data }));
     if (!ps.length) console.log('Проектов нет.');
     for (const p of ps) console.log(`[${p.id}] ${p.status === 'done' ? '✓' : '·'} ${p.title} — ${p.steps.filter((x) => x.done).length}/${p.steps.length}`);
+  } else if (cmd === 'extras') {
+    const xs = (await docs()).filter((d) => d.path.startsWith('extra/')).map((d) => ({ id: d.path.slice(6), ...d.data }));
+    const p = xs.filter((x) => x.status === 'pending');
+    if (!p.length) console.log('Ничего не ждёт оценки.');
+    for (const x of p) console.log(`[${x.id}] ${time(x.at)} ${x.by || '?'} · ${x.min} мин\n  ${x.text}`);
+  } else if (cmd === 'extra-rate') {
+    await api('PATCH', '/doc?path=extra/' + a, { patch: { status: 'rated', pts: Number(rest[0]), note: rest.slice(1).join(' ') } });
+    console.log('оценено');
+  } else if (cmd === 'bonus') {
+    const id = 'b' + Date.now().toString(36);
+    await api('PUT', '/doc?path=extra/' + id, { data: { kind: 'bonus', by: a, pts: Number(rest[0]), text: rest.slice(1).join(' '), at: Date.now(), status: 'rated' } });
+    console.log('бонус начислен:', a, rest[0]);
+  } else if (cmd === 'score') {
+    const all = await docs();
+    const d = new Date(Date.now() - 4 * 3600000);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const from = d.getTime() + 4 * 3600000;
+    const board = {};
+    for (const doc of all.filter((x) => x.path.startsWith('log/')))
+      for (const e of Object.values(doc.data)) if (e && e.at >= from) (board[e.by || '?'] ||= 0), (board[e.by || '?'] += e.pts || 0);
+    for (const doc of all.filter((x) => x.path.startsWith('extra/')))
+      if (doc.data.status === 'rated' && doc.data.at >= from) (board[doc.data.by || '?'] ||= 0), (board[doc.data.by || '?'] += doc.data.pts || 0);
+    console.log('неделя с', time(from), JSON.stringify(board));
   } else if (cmd === 'reply') {
     const text = rest.join(' ').trim();
     if (!a || !text) throw new Error('нужно: reply <id> <текст>');

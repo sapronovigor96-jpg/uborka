@@ -343,3 +343,35 @@ test('сброс с выбором «давно» показывает чест�
   L.startFrom(st, NOW, 2);
   assert.ok(L.homeHealth(st, NOW) < 0.6);
 });
+
+test('очки: минуты × сложность, «уже сделано» +25%, записываются в журнал', () => {
+  const st = fresh();
+  assert.equal(L.points(L.task(st, 's-clothes')), 3); // лёгкое ×1
+  assert.equal(L.points(L.task(st, 'b-toilet')), 11); // гигиена 7 × 1,5
+  assert.equal(L.points(L.task(st, 'k-oven')), 60); // тяжёлое 30 × 2
+  assert.equal(L.points(L.task(st, 's-clothes'), true), 4); // 3 × 1,25
+  L.complete(st, 'b-toilet', NOW, 7);
+  assert.equal(st.log[0].pts, 11);
+});
+
+test('неделя начинается в понедельник в 4:00', () => {
+  const sunNight = new Date(2026, 8, 28, 2, 0).getTime(); // пн 28.09, 02:00 — ещё прошлая неделя
+  const monMorning = new Date(2026, 8, 28, 9, 0).getTime();
+  assert.equal(new Date(L.weekStart(monMorning)).getDate(), 28);
+  assert.equal(new Date(L.weekStart(sunNight)).getDate(), 21);
+});
+
+test('счёт недели: дела и оценённые «сверх списка» по людям', () => {
+  const st = fresh();
+  const from = L.weekStart(NOW);
+  L.complete(st, 'b-toilet', NOW, 7);
+  st.log[0].by = 'Игорь';
+  L.complete(st, 'pt-litter', NOW, 2);
+  st.log[1].by = 'Маша';
+  const extras = [
+    { by: 'Маша', pts: 20, at: NOW, status: 'rated' },
+    { by: 'Маша', pts: 99, at: NOW, status: 'pending' },
+  ];
+  const board = L.scoreboard(st, extras, from, from + 7 * L.DAY);
+  assert.deepEqual(board.map((r) => [r.by, r.pts]), [['Маша', 23], ['Игорь', 11]]);
+});

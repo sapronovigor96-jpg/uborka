@@ -268,7 +268,10 @@ export function complete(st, taskId, now, min, real = false, pre = false) {
   st.last[taskId] = clock(st, now);
   const own = (st.custom || []).find((x) => x.id === taskId);
   if (own) own.soon = false;
-  st.log.push(pre ? { id: taskId, at: now, min, prev, real, pre } : { id: taskId, at: now, min, prev, real });
+  // Очки фиксируются в момент отметки: если правила потом поменяются, прошлые недели не пересчитаются.
+  const t = task(st, taskId);
+  const pts = t ? points(t, pre) : 0;
+  st.log.push(pre ? { id: taskId, at: now, min, prev, real, pre, pts } : { id: taskId, at: now, min, prev, real, pts });
   if (st.log.length > LOG_CAP) st.log.splice(0, st.log.length - LOG_CAP);
 }
 
@@ -600,4 +603,58 @@ export function rateTask(st, id, v, by, now) {
   if (v === 'rare') st.every[id] = [...FREQ_STEPS].reverse().find((f) => f < cur) || 1;
   if (v === 'no') st.taskOff[id] = true;
   return st.every[id];
+}
+
+// ---------- очки и недельные итоги ----------
+// Очки дела = минуты по оценке × сложность. По оценке, а не по факту: медленнее — не значит больше.
+// Сложность: тяжёлые дела ×2, грязные и гигиенические ×1,5, остальные ×1. У своих дел — поле diff.
+// «Уже сделано» (сделал заодно, сверх плана) — +25%.
+const HEAVY = new Set(['k-oven', 'k-behind', 'k-cabinets', 'k-fridge', 'x-windows', 'x-furniture', 'l-windows', 'l-curtains', 's-wardrobe', 'h-season', 'p-sort', 'b-grout', 'b-limescale', 'c-sort']);
+export const PRE_BONUS = 1.25;
+export const NEW_TASK_BONUS = 10;
+
+export function difficulty(t) {
+  if (t.diff) return t.diff;
+  if (HEAVY.has(t.id)) return 2;
+  if ((t.tags || []).includes('hyg') || /лоток|унитаз|мусор/i.test(t.t)) return 1.5;
+  return 1;
+}
+
+export function points(t, pre = false) {
+  return Math.max(1, Math.round(t.min * difficulty(t) * (pre ? PRE_BONUS : 1)));
+}
+
+// Очки записи журнала: сохранённые или (для старых записей) посчитанные по делу.
+export function entryPoints(st, e) {
+  if (typeof e.pts === 'number') return e.pts;
+  const t = task(st, e.id);
+  return t ? points(t, !!e.pre) : 0;
+}
+
+// Неделя — с понедельника 4:00 (как и день для мелочей).
+export function weekStart(now) {
+  const d = new Date(now - DAY_START_H * 3600000);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.getTime() + DAY_START_H * 3600000;
+}
+
+// Счёт за период. extras — дела сверх списка и бонусы: { by, pts, at, status: 'rated' }.
+export function scoreboard(st, extras, from, to) {
+  const board = {};
+  const row = (by) => (board[by || ''] ||= { by: by || '', pts: 0, tasks: 0, minutes: 0, extra: 0 });
+  for (const e of st.log) {
+    if (e.at < from || e.at >= to) continue;
+    const r = row(e.by);
+    r.pts += entryPoints(st, e);
+    r.tasks++;
+    r.minutes += e.min || 0;
+  }
+  for (const x of extras || []) {
+    if (x.status !== 'rated' || x.at < from || x.at >= to) continue;
+    const r = row(x.by);
+    r.pts += x.pts || 0;
+    r.extra++;
+  }
+  return Object.values(board).sort((a, b) => b.pts - a.pts);
 }

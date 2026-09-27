@@ -141,6 +141,16 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .start-small small { font-size: 13px; font-weight: 500; opacity: .75; }
 .search { margin: 14px 0 16px; }
 .inbox-btn { margin-top: 14px; }
+.score { display: flex; flex-direction: column; gap: 8px; }
+.score.lead { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc-soft); }
+.score-head { display: flex; justify-content: space-between; align-items: baseline; }
+.score-head b { font: 500 20px var(--serif); }
+.score .pts { font: 500 30px var(--serif); color: var(--acc); font-variant-numeric: tabular-nums; }
+.pts-sm { color: var(--acc); font-variant-numeric: tabular-nums; }
+.rules { margin-top: 20px; }
+.rules summary { cursor: pointer; color: var(--mut); }
+.rules ul { margin: 10px 0 0; padding-left: 18px; }
+.tabs button { max-width: 120px; }
 .inbox-list { margin-top: 14px; }
 .bar.mini { display: block; height: 4px; margin-top: 6px; }
 .tl.projects .tt { width: 100%; }
