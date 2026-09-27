@@ -380,6 +380,7 @@ let query = '';
 function renderHome() {
   view.innerHTML = `<h1 class="page-title">Комнаты</h1>
     <p class="mut small">По порядку уборки — от дальней к выходу. Сделали что-то без приложения — найдите и отметьте.</p>
+    <button class="btn wide inbox-btn" data-act="inbox-open">+ Дело во входящие${inboxWaiting() ? ` · ждут Claude: ${inboxWaiting()}` : ''}</button>
     <input class="field search" id="search" data-act="search" type="search" placeholder="Найти дело: пол, лоток, окна…" value="${esc(query)}">
     <div id="zones">${zonesHtml()}</div>`;
 }
@@ -571,6 +572,11 @@ let chat = { msgs: [], can: 'off', thread: null, names: {}, open: false, sending
 async function startChat() {
   const db = S.database();
   if (!db) return;
+  db.collection('inbox').orderBy('at').limit(50).onSnapshot((snap) => {
+    inbox = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (tab === 'home' && !st.session) render();
+    if (inboxOpen) renderInbox();
+  });
   db.collection('chat').orderBy('at').limit(100).onSnapshot((snap) => {
     chat.msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     loadNames();
@@ -760,6 +766,54 @@ function icsFromHash() {
   return true;
 }
 
+/* ---------- входящие: идеи дел своими словами, Claude настраивает ---------- */
+// В общем доме — коллекция inbox/<id> { text, by, at, status: 'new' | 'done' | 'skip', taskId, note }.
+// Без общего дома — список в st.inbox на этом телефоне.
+
+let inbox = [];
+let inboxOpen = false;
+
+const inboxItems = () => (S.shared ? inbox : st.inbox || []);
+const inboxWaiting = () => inboxItems().filter((x) => x.status === 'new').length;
+
+function renderInbox() {
+  const items = [...inboxItems()].sort((a, b) => b.at - a.at).slice(0, 20);
+  const state = (x) =>
+    x.status === 'done' ? `добавлено${x.taskId && L.task(st, x.taskId) ? ': ' + esc(tname(L.task(st, x.taskId))) : ''}`
+    : x.status === 'skip' ? 'Claude: ' + esc(x.note || 'не стал добавлять')
+    : 'ждёт Claude';
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>Входящие дела</h2>
+    <p class="small mut">Опишите дело своими словами. Claude решит, в какую комнату его поставить, как часто и сколько времени оно займёт, — и добавит в ваш дом.</p>
+    <textarea class="field note-text" id="inbox-text" rows="3" maxlength="500" placeholder="Например: протирать домик Тони от шерсти"></textarea>
+    <button class="btn wide primary" data-act="inbox-save">Во входящие</button>
+    ${items.length ? `<ul class="tl inbox-list">${items.map((x) => `<li class="${x.status !== 'new' ? 'is-done' : ''}"><span class="tt">${esc(x.text)}<small>${S.shared && x.by ? esc(x.by) + ' · ' : ''}${state(x)}</small></span></li>`).join('')}</ul>` : ''}
+    ${S.shared ? '' : '<p class="small dim">Без общего дома Claude увидит входящие, только если вы их скопируете ему. Подключите общий дом в Настройках.</p>'}`;
+}
+
+function openInbox() {
+  inboxOpen = true;
+  renderInbox();
+  openSheetEl();
+  setTimeout(() => $('#inbox-text')?.focus(), 50);
+}
+
+async function saveInbox() {
+  const text = ($('#inbox-text').value || '').trim();
+  if (!text) return;
+  const item = { text, by: S.me || '', at: now(), status: 'new' };
+  const id = 'i' + now().toString(36);
+  if (S.shared) await S.database().collection('inbox').doc(id).set(item);
+  else {
+    st.inbox = [...(st.inbox || []), { id, ...item }];
+    commit();
+  }
+  $('#inbox-text').value = '';
+  toast('Во входящих — Claude настроит дело');
+  renderInbox();
+  render();
+}
+
 /* ---------- общий дом (телефонная версия) ---------- */
 
 function syncText(r) {
@@ -921,8 +975,12 @@ function whenChips(t) {
 }
 
 function openOwnSheet(t) {
-  $('#sheet').innerHTML = `<h2>${esc(t.t)}</h2>
-    <div class="mut small">Своё дело · ${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
+  const w = L.why(t);
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>${esc(t.t)}</h2>
+    <div class="mut small">Своё дело${t.by === 'claude' ? ' · настроил Claude' : ''} · ${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
+    ${w ? `<div class="why-box"><p><b>Даст:</b> ${esc(w[0])}</p><p class="mut"><b>Если пропустить:</b> ${esc(w[1])}</p></div>` : ''}
+    ${t.hint ? `<p class="small mut">${esc(t.hint)}</p>` : ''}
     ${whenChips(t)}
     <div class="stack" style="margin-top:20px">
       <button class="btn wide primary" data-act="done" data-id="${t.id}">Сделано сегодня</button>
@@ -939,6 +997,7 @@ function openSheetEl() {
 
 function closeSheet() {
   chat.open = false;
+  inboxOpen = false;
   $('#sheet').hidden = true;
   $('#sheet-bg').hidden = true;
 }
@@ -1438,6 +1497,10 @@ document.addEventListener('click', (e) => {
       S.disconnect();
       toast('Телефон отключён от общего дома');
       return setTimeout(() => location.reload(), 800);
+    case 'inbox-open':
+      return openInbox();
+    case 'inbox-save':
+      return saveInbox();
     case 'chat-send':
       return sendChat();
     case 'note':

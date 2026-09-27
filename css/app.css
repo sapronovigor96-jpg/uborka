@@ -140,6 +140,8 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .start-small {flex-direction: column; gap: 0; min-height: 68px; margin-top: 18px; font-size: 19px; }
 .start-small small { font-size: 13px; font-weight: 500; opacity: .75; }
 .search { margin: 14px 0 16px; }
+.inbox-btn { margin-top: 14px; }
+.inbox-list { margin-top: 14px; }
 .house .win.fresh .win-lit { animation: fresh 1.6s ease-in-out 3; }
 @keyframes fresh { 50% { opacity: .35; } }
 .budgets.three { grid-template-columns: repeat(3, 1fr); }

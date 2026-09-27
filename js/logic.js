@@ -303,7 +303,7 @@ export function learned(t, st) {
 }
 
 export function why(t) {
-  return WHY[t.id] || null;
+  return WHY[t.id] || (Array.isArray(t.why) && t.why.length === 2 ? t.why : null);
 }
 
 export function setZone(st, zoneId, on, now) {
