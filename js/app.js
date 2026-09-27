@@ -368,7 +368,7 @@ function taskRow(t, showZone) {
   return `<li class="${done ? 'is-done' : ''}">
     <span class="dot ${done ? '' : dotClass(u)}"></span>
     <button class="tt" data-act="task" data-id="${t.id}">${esc(tname(t))}
-      <small>${showZone ? esc(zname(L.zoneOf(t, st))) + ' · ' : ''}${taskMeta(t)}</small></button>
+      <small>${showZone ? esc(zname(L.zoneOf(t, st))) + ' · ' : ''}${taskMeta(t)}${st.assign[t.id] ? ' · ' + esc(st.assign[t.id] === S.me ? 'моё' : st.assign[t.id]) : ''}</small></button>
     <button class="check ${done ? 'done' : ''}" data-act="${done ? 'undo-today' : 'done'}" data-id="${t.id}" aria-label="${done ? 'Снять отметку' : 'Сделано'}">✓</button>
   </li>`;
 }
@@ -519,6 +519,7 @@ function openSheet(id) {
     <div class="mut small">${esc(zname(L.zoneOf(t, st)))} · ${taskMeta(t)}</div>
     ${w ? `<div class="why-box"><p><b>Даст:</b> ${esc(w[0])}</p><p class="mut"><b>Если пропустить:</b> ${esc(w[1])}</p></div>` : ''}
     ${usual}
+    ${assignChips(t)}
     ${rateChips(t)}
     ${t.prep ? `<p class="small"><b>Сначала:</b> ${esc(L.label(t, st, t.prep))} — и ${t.wait} мин пусть действует.</p>` : ''}
     ${t.hint ? `<p class="small mut">${esc(t.hint)}</p>` : ''}
@@ -1067,6 +1068,10 @@ async function pairGo() {
   toast('Подключаюсь…');
   const res = await S.connect(st, now(), onRemote, onRemoteStatus);
   if (res === true) {
+    if (!(st.people || []).includes(name)) {
+      st.people = [...(st.people || []), name];
+      commit();
+    }
     closeSheet();
     startChat();
     render();
@@ -1152,6 +1157,23 @@ const RATE = [
   ['no', 'Не про нас'],
 ];
 
+// Кто есть в доме: из списка жильцов и из журнала (у старых записей).
+function people() {
+  const set = new Set(st.people || []);
+  for (const e of st.log) if (e.by) set.add(e.by);
+  if (S.me) set.add(S.me);
+  return [...set].filter(Boolean);
+}
+
+function assignChips(t) {
+  if (!S.shared) return '';
+  const cur = st.assign[t.id] || '';
+  return `<div class="sec-title">Чьё дело</div>
+    <div class="chips">${[['', 'Общее'], ...people().map((p) => [p, p])]
+      .map(([v, n]) => `<button class="chip ${cur === v ? 'on' : ''}" data-act="assign" data-id="${t.id}" data-v="${esc(v)}">${esc(n)}</button>`)
+      .join('')}</div>`;
+}
+
 function rateChips(t) {
   const cur = st.fb[t.id] && st.fb[t.id].v;
   return `<div class="sec-title">Как вам это дело?</div>
@@ -1176,6 +1198,7 @@ function openOwnSheet(t) {
     ${w ? `<div class="why-box"><p><b>Даст:</b> ${esc(w[0])}</p><p class="mut"><b>Если пропустить:</b> ${esc(w[1])}</p></div>` : ''}
     ${t.hint ? `<p class="small mut">${esc(t.hint)}</p>` : ''}
     ${whenChips(t)}
+    ${assignChips(t)}
     <div class="stack" style="margin-top:20px">
       <button class="btn wide primary" data-act="done" data-id="${t.id}">Сделано сегодня</button>
       <button class="btn wide" data-act="done-yday" data-id="${t.id}">Сделано вчера</button>
@@ -1580,6 +1603,7 @@ function sessionAct(act, el) {
 /* ---------- маршрутизация и события ---------- */
 
 function render() {
+  st._me = S.shared ? S.me : null;
   if (!st.setup) {
     renderSetup();
     return;
@@ -1806,6 +1830,15 @@ document.addEventListener('click', (e) => {
       render();
       return toast(`Сохранено: ${L.fmtEvery(L.effEvery(L.task(st, id), st))}`);
     }
+    case 'assign': {
+      const v = el.dataset.v;
+      if (v) st.assign[id] = v;
+      else delete st.assign[id];
+      commit();
+      openSheet(id);
+      render();
+      return toast(v ? (v === S.me ? 'Теперь это ваше дело' : `Теперь это дело — ${v}`) : 'Теперь дело общее');
+    }
     case 'rate': {
       const t = L.task(st, id);
       const v = el.dataset.v;
@@ -1923,6 +1956,10 @@ S.askPersist();
 // Внутри Claude: подключаем общую базу и чат. Чужие отметки приходят сами и перерисовывают экран.
 S.connect(st, now(), onRemote, onRemoteStatus).then((ok) => {
   if (ok === true) {
+    if (S.me && !(st.people || []).includes(S.me)) {
+      st.people = [...(st.people || []), S.me];
+      commit();
+    }
     startChat();
     render();
   } else if (ok === 'wrong_key') toast('Ключ общего дома не подходит — проверьте в Настройках');

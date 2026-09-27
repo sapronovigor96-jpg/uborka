@@ -375,3 +375,23 @@ test('счёт недели: дела и оценённые «сверх спи�
   const board = L.scoreboard(st, extras, from, from + 7 * L.DAY);
   assert.deepEqual(board.map((r) => [r.by, r.pts]), [['Маша', 23], ['Игорь', 11]]);
 });
+
+test('распределение: дело Маши не попадает в мои списки, общее — попадает, в доме видно всё', () => {
+  const st = fresh();
+  L.startFrom(st, NOW, 2);
+  st.assign['k-trash'] = 'Маша';
+  st._me = 'Игорь';
+  assert.ok(!L.dueTasks(st, NOW).some((x) => x.t.id === 'k-trash'));
+  assert.ok(L.activeTasks(st).some((t) => t.id === 'k-trash'));
+  st._me = 'Маша';
+  assert.ok(L.dueTasks(st, NOW).some((x) => x.t.id === 'k-trash'));
+  st.assign['s-cups'] = 'Маша';
+  st._me = 'Игорь';
+  assert.ok(!L.ritual(st, 'evening').some((t) => t.id === 's-cups'));
+});
+
+test('составные дела разделены: в названии одно действие', () => {
+  const t = (id) => TASKS.find((x) => x.id === id).t;
+  assert.equal(t('k-counters'), 'Протереть столешницу');
+  assert.ok(TASKS.some((x) => x.id === 'k-splash') && TASKS.some((x) => x.id === 'l-leaves'));
+});

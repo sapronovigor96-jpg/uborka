@@ -16,7 +16,8 @@ function makeDb() {
   });
   const merge = (a, b) => {
     for (const [k, v] of Object.entries(b)) {
-      if (v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object') merge(a[k], v);
+      if (v === null) delete a[k];
+      else if (v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object') merge(a[k], v);
       else a[k] = v;
     }
   };
@@ -128,4 +129,26 @@ test('незавершённая уборка остаётся на своём �
   a.S.save(stA);
   await settle();
   assert.ok(!('session' in db.docs.get('home/state')));
+});
+
+test('телефон со старой копией не затирает то, что добавил Claude', async () => {
+  const db = makeDb();
+  const a = await phone(db, 'u_ivan', 20);
+  const stA = a.L.initState(NOW);
+  stA.setup = true;
+  stA.taskOff = { 'k-dishes': true };
+  await a.S.connect(stA, NOW, () => {});
+  await settle();
+  // Claude пишет в базу напрямую, телефон ещё не получил обновление
+  const srv = db.docs.get('home/state');
+  srv.custom = [{ id: 'u-claude', z: 'hall', t: 'Дело от Claude', every: 7, min: 5 }];
+  srv.taskOff = { ...srv.taskOff, 'l-carpet': true };
+  // Телефон меняет своё — старая копия
+  stA.taskOff['s-bed'] = true;
+  delete stA.taskOff['k-dishes'];
+  a.S.save(stA);
+  await settle();
+  const after = db.docs.get('home/state');
+  assert.equal(after.custom.length, 1, 'дело от Claude на месте');
+  assert.deepEqual(after.taskOff, { 'l-carpet': true, 's-bed': true });
 });

@@ -34,6 +34,8 @@ export function initState(now) {
     remind: defaultRemind(),
     notes: [], // «что неудобно»: { id, at, text, ctx, done }
     fb: {}, // оценки дел: { taskId: { v: 'ok'|'often'|'rare'|'no', by, at } }
+    assign: {}, // чьё дело: { taskId: имя }; нет записи — общее
+    people: [], // кто живёт в общем доме (имена)
     setup: false, // знакомство с домом пройдено
     pause: null,
   };
@@ -80,6 +82,16 @@ export function zoneLabel(st, zoneId) {
 
 export function zonesShown(st) {
   return ZONES.filter((z) => zoneOn(st, z.id)).sort((a, b) => a.order - b.order);
+}
+
+// Дела для «моих» списков (мелочи, «ждут заботы», уборки): общие и мои. Дела другого жильца — не мне.
+export function mine(t, st) {
+  const who = st.assign && st.assign[t.id];
+  return !who || !st._me || who === st._me;
+}
+
+export function myTasks(st) {
+  return activeTasks(st).filter((t) => mine(t, st));
 }
 
 export function activeTasks(st) {
@@ -193,7 +205,7 @@ export function priority(t, u) {
 }
 
 export function dueTasks(st, now, minUrg = DUE) {
-  return activeTasks(st)
+  return myTasks(st)
     .map((t) => ({ t, u: urgency(t, st, now) }))
     .filter((x) => x.u >= minUrg)
     .sort((a, b) => priority(b.t, b.u) - priority(a.t, a.u) || a.t.min - b.t.min);
@@ -370,6 +382,8 @@ export function normalize(raw, now) {
     remind: { ...defaultRemind(), ...(raw.remind || {}) },
     notes: Array.isArray(raw.notes) ? raw.notes : [],
     fb: raw.fb && typeof raw.fb === 'object' ? raw.fb : {},
+    assign: raw.assign && typeof raw.assign === 'object' ? raw.assign : {},
+    people: Array.isArray(raw.people) ? raw.people : [],
     last: raw.last || {},
     log: Array.isArray(raw.log) ? raw.log : [],
     zonesOn: raw.zonesOn || {},
@@ -438,7 +452,7 @@ export function whenOf(t, st) {
 }
 
 export function dailyTasks(st) {
-  return activeTasks(st).filter((t) => effEvery(t, st) <= 1);
+  return myTasks(st).filter((t) => effEvery(t, st) <= 1);
 }
 
 // «День» для мелочей начинается в 4 утра: вечер, закончившийся после полуночи, — всё ещё вчерашний.

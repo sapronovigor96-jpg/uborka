@@ -37,7 +37,8 @@ export const TASKS = [
   // Кухня
   { id: 'k-towels', z: 'kitchen', t: 'Полотенца и прихватки — в стирку', every: 3, min: 1, ord: 0 },
   { id: 'k-dishes', z: 'kitchen', t: 'Посуда', every: 1, min: 10, ord: 1, when: 'evening', tags: ['hyg'], hint: 'В посудомойку или вымыть, сушилку освободить.' },
-  { id: 'k-top', z: 'kitchen', t: 'Верх шкафов и вытяжка снаружи', every: 14, min: 5, ord: 4, tags: ['dust'] },
+  { id: 'k-top', z: 'kitchen', t: 'Верх кухонных шкафов — пыль', every: 14, min: 3, ord: 4, tags: ['dust'] },
+  { id: 'k-hood-out', z: 'kitchen', t: 'Вытяжка снаружи — жир и пыль', every: 14, min: 3, ord: 4, hint: 'Обезжиривателем, потом насухо.' },
   { id: 'k-fronts', z: 'kitchen', t: 'Фасады шкафов и ручки', every: 14, min: 5, ord: 5, hint: 'Жирные отпечатки — обезжиривателем.' },
   { id: 'k-appliances', z: 'kitchen', t: 'Техника снаружи', every: 14, min: 5, ord: 6, hint: 'Холодильник, чайник, духовка, кофемашина.' },
   { id: 'k-fridge', z: 'kitchen', t: 'Холодильник: выбросить просрочку, протереть полки', every: 30, min: 20, ord: 6, hint: 'Вода с содой, без запахов химии.' },
@@ -46,8 +47,10 @@ export const TASKS = [
     prep: 'Микроволновка: миска воды с лимоном, 4 мин на полной мощности, дверцу не открывать',
     hint: 'Пар уже размягчил грязь — просто протереть.',
   },
-  { id: 'k-hob', z: 'kitchen', t: 'Варочная панель и фартук', every: 7, min: 5, ord: 8, hint: 'Стеклокерамику — без абразивов, скребком.' },
-  { id: 'k-counters', z: 'kitchen', t: 'Столешницы и стол', every: 1, min: 3, ord: 9, when: 'evening', tags: ['hyg'] },
+  { id: 'k-hob', z: 'kitchen', t: 'Варочная панель', every: 7, min: 3, ord: 8, hint: 'Стеклокерамику — без абразивов, скребком.' },
+  { id: 'k-counters', z: 'kitchen', t: 'Протереть столешницу', every: 1, min: 2, ord: 9, when: 'evening', tags: ['hyg'] },
+  { id: 'k-splash', z: 'kitchen', t: 'Фартук у плиты — брызги', every: 7, min: 2, ord: 8 },
+  { id: 'k-table', z: 'kitchen', t: 'Протереть обеденный стол', every: 1, min: 1, ord: 9, when: 'evening' },
   {
     id: 'k-hood', kit: ['Обезжириватель', 'Щётка'], z: 'kitchen', t: 'Фильтр вытяжки — промыть щёткой', every: 30, min: 10, ord: 10, wait: 20,
     prep: 'Замочить фильтр вытяжки в горячей воде с обезжиривателем',
@@ -73,17 +76,19 @@ export const TASKS = [
   { id: 'b-towels', z: 'bath', t: 'Полотенца — в стирку', every: 4, min: 1, ord: 0, tags: ['hyg'], hint: '60 °C. Кондиционера поменьше — от него полотенца хуже впитывают.' },
   { id: 'b-mat', z: 'bath', t: 'Коврик — в стирку', every: 7, min: 1, ord: 0 },
   { id: 'b-trash', z: 'bath', t: 'Мусорное ведро в ванной', every: 7, min: 2, ord: 0 },
-  { id: 'b-vent', z: 'bath', t: 'Вентрешётка и светильник', every: 90, min: 10, ord: 2, tags: ['dust'] },
+  { id: 'b-vent', z: 'bath', t: 'Вентрешётка — пыль', every: 90, min: 5, ord: 2, tags: ['dust'] },
+  { id: 'b-light', z: 'bath', t: 'Светильник в ванной — пыль', every: 90, min: 5, ord: 2, tags: ['dust'] },
   { id: 'b-mirror', z: 'bath', t: 'Зеркала', every: 7, min: 2, ord: 3 },
   {
-    id: 'b-tub', kit: ['Перчатки', 'Средство от налёта', 'Жёлтая тряпка'], z: 'bath', t: 'Кафель, ванна и душ — смыть и вытереть', every: 7, min: 10, ord: 4, tags: ['hyg'], wait: 10,
-    prep: 'Нанести средство от налёта на ванну, душ и кафель в зоне брызг', warn: NO_BLEACH,
+    id: 'b-tub', kit: ['Перчатки', 'Средство от налёта', 'Жёлтая тряпка'], z: 'bath', t: 'Ванна и душ — смыть и вытереть', every: 7, min: 10, ord: 4, tags: ['hyg'], wait: 10,
+    prep: 'Нанести средство от налёта на ванну и душ', warn: NO_BLEACH,
   },
+  { id: 'b-tiles', z: 'bath', t: 'Кафель в зоне брызг — от налёта', every: 14, min: 5, ord: 4, kit: ['Средство от налёта', 'Жёлтая тряпка'] },
   {
     id: 'b-limescale', kit: ['Уксус или лимонная кислота', 'Миска'], z: 'bath', t: 'Лейка, смесители, аэраторы — дочистить', every: 30, min: 10, ord: 5, wait: 60,
     prep: 'Замочить лейку душа и аэраторы в уксусе (или лимонной кислоте)', warn: 'Уксус нельзя рядом с хлоркой.',
   },
-  { id: 'b-sink', z: 'bath', t: 'Ванная: раковина и смесители от налёта, стаканы, мыльница', every: 7, min: 4, ord: 6, tags: ['hyg'] },
+  { id: 'b-sink', z: 'bath', t: 'Раковина и смеситель — от налёта', every: 7, min: 3, ord: 6, tags: ['hyg'] },
   { id: 'b-touch', z: 'bath', t: 'Ручка двери, выключатель, кнопка слива', every: 7, min: 1, ord: 7 },
   {
     id: 'b-toilet', kit: ['Перчатки', 'Гель для унитаза', 'Ёршик', 'Красная тряпка'], z: 'bath', t: 'Унитаз целиком', every: 7, min: 7, ord: 8, tags: ['hyg'], wait: 10,
@@ -92,9 +97,12 @@ export const TASKS = [
     warn: NO_BLEACH,
   },
   { id: 'b-grout', z: 'bath', t: 'Швы плитки', every: 30, min: 20, ord: 9, hint: 'Узкая щётка + кислородное средство.' },
+  { id: 'b-cups', z: 'bath', t: 'Стаканы и мыльница — вымыть', every: 7, min: 2, ord: 6 },
   { id: 'b-drains', z: 'bath', t: 'Сливы — волосы и запах', every: 30, min: 5, ord: 9, hint: 'Трос для слива, потом кипяток. Сода + уксус бесполезны.' },
+  { id: 'b-washer-run', z: 'bath', t: 'Стиральная машина: пустая стирка 90 °C', every: 30, min: 2, ord: 9, hint: 'С лимонной кислотой или средством для машин. Потом дверцу оставить открытой.' },
+  { id: 'b-washer-filter', z: 'bath', t: 'Стиральная машина: почистить фильтр', every: 90, min: 10, ord: 9, hint: 'Подставить тряпку и таз — вытечет вода.' },
   { id: 'b-curtain', z: 'bath', t: 'Шторка душа — в стирку', every: 60, min: 2, ord: 9 },
-  { id: 'b-washer', z: 'bath', t: 'Стиральная машина: манжета, лоток, фильтр, пустая стирка 90 °C', every: 30, min: 15, ord: 9 },
+  { id: 'b-washer', z: 'bath', t: 'Стиральная машина: протереть манжету и лоток', every: 30, min: 15, ord: 9 },
   { id: 'b-floor', z: 'bath', t: 'Пол в ванной и за унитазом', every: 7, min: 5, ord: 20, tags: ['floor'] },
 
   // Спальня
@@ -115,18 +123,21 @@ export const TASKS = [
   { id: 'l-tidy', z: 'living', t: 'Вещи на места, подушки, плед', every: 1, min: 5, ord: 1, when: 'evening', hint: 'Всё чужое — в одну корзину и разнести за один проход.' },
   { id: 'l-dust', z: 'living', t: 'Пыль: углы потолка, полки, техника, подоконник', every: 7, min: 7, ord: 2, tags: ['dust'], hint: 'Экран ТВ — только сухой микрофиброй.' },
   { id: 'l-touch', z: 'living', t: 'Пульты, выключатели, ручки', every: 14, min: 2, ord: 4 },
-  { id: 'l-plants', z: 'living', t: 'Цветы: полить, протереть листья', every: 7, min: 5, ord: 4 },
+  { id: 'l-plants', z: 'living', t: 'Цветы: полить', every: 7, min: 3, ord: 4 },
+  { id: 'l-leaves', z: 'living', t: 'Цветы: протереть листья', every: 30, min: 5, ord: 4 },
   { id: 'l-windows', z: 'living', t: 'Окна изнутри', every: 30, min: 15, ord: 3, hint: 'Не на солнце — останутся разводы.' },
   { id: 'l-sofa', z: 'living', t: 'Мягкая мебель — пылесосом', every: 30, min: 15, ord: 5, tags: ['dust'] },
   { id: 'l-covers', z: 'living', t: 'Чехлы подушек и пледы — в стирку', every: 30, min: 3, ord: 0 },
-  { id: 'l-baseboards', z: 'living', t: 'Плинтусы и двери — влажно', every: 30, min: 15, ord: 6 },
+  { id: 'l-baseboards', z: 'living', t: 'Плинтусы — влажной тряпкой', every: 30, min: 10, ord: 6 },
+  { id: 'l-doors', z: 'living', t: 'Двери и косяки — отпечатки', every: 30, min: 5, ord: 6 },
   { id: 'l-curtains', z: 'living', t: 'Шторы и жалюзи', every: 135, min: 45, ord: 3 },
   { id: 'l-carpet', z: 'living', t: 'Ковёр — глубокая чистка', every: 270, min: 90, ord: 21 },
   { id: 'l-floor', z: 'living', t: 'Пылесос и пол в гостиной, под диваном', every: 7, min: 10, ord: 20, tags: ['floor'] },
 
   // Прихожая
   { id: 'h-shoes', z: 'hall', t: 'Обувь на полку', every: 1, min: 1, ord: 1, when: 'evening' },
-  { id: 'h-mirror', z: 'hall', t: 'Зеркало, ручки, звонок, выключатели', every: 14, min: 3, ord: 3 },
+  { id: 'h-mirror', z: 'hall', t: 'Зеркало в прихожей', every: 14, min: 2, ord: 3 },
+  { id: 'h-touch', z: 'hall', t: 'Ручки, звонок и выключатели в прихожей', every: 14, min: 2, ord: 3 },
   { id: 'h-mat', z: 'hall', t: 'Коврик у двери — вытряхнуть', every: 7, min: 2, ord: 5 },
   { id: 'h-door', z: 'hall', t: 'Входная дверь целиком', every: 30, min: 10, ord: 4 },
   { id: 'h-shoerack', z: 'hall', t: 'Полка для обуви внутри', every: 30, min: 10, ord: 4 },
@@ -148,7 +159,8 @@ export const TASKS = [
 
   // Рабочее место
   { id: 'w-desk', z: 'work', t: 'Стол пустой в конце дня', every: 1, min: 2, ord: 1, when: 'evening' },
-  { id: 'w-monitor', z: 'work', t: 'Монитор и пыль на проводах', every: 7, min: 3, ord: 2, tags: ['dust'], hint: 'Экран — только сухой микрофиброй.' },
+  { id: 'w-monitor', z: 'work', t: 'Монитор — сухой микрофиброй', every: 7, min: 2, ord: 2, tags: ['dust'], hint: 'Экран — только сухой микрофиброй.' },
+  { id: 'w-cables', z: 'work', t: 'Провода и удлинители — пыль', every: 30, min: 3, ord: 2, tags: ['dust'] },
   { id: 'w-devices', z: 'work', t: 'Клавиатура, мышь, телефон — спиртовой салфеткой', every: 7, min: 3, ord: 3 },
   { id: 'w-papers', z: 'work', t: 'Разбор бумаг и ящиков', every: 30, min: 20, ord: 4 },
 
@@ -156,7 +168,9 @@ export const TASKS = [
   { id: 'x-smoke', z: 'home', t: 'Проверить датчики дыма', every: 30, min: 2, ord: 1 },
   { id: 'x-filters', z: 'home', t: 'Фильтры очистителя и кондиционера', every: 60, min: 10, ord: 2 },
   { id: 'x-windows', z: 'home', t: 'Окна снаружи, рамы, москитные сетки', every: 180, min: 60, ord: 3, hint: 'Весной и осенью, в пасмурную сухую погоду.' },
-  { id: 'x-furniture', z: 'home', t: 'Отодвинуть мебель: пыль за ней и в батареях', every: 180, min: 120, ord: 4, tags: ['dust'] },
+  { id: 'x-furniture', z: 'home', t: 'Отодвинуть мебель и убрать пыль за ней', every: 180, min: 90, ord: 4, tags: ['dust'] },
+
+  { id: 'x-radiators', z: 'home', t: 'Батареи внутри — пыль', every: 180, min: 30, ord: 4, tags: ['dust'], hint: 'Длинной щёткой или насадкой пылесоса, сверху вниз.' },
 
   // Питомцы
   { id: 'pt-bowls', z: 'pets', t: 'Миски: помыть, налить свежей воды', every: 1, min: 3, ord: 1, when: 'morning', need: 'pet', tags: ['hyg'], hint: 'Отдельной губкой, не той, что для посуды.', kit: ['Губка для мисок'] },

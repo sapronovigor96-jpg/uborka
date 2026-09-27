@@ -4,7 +4,7 @@
 //    localStorage остаётся копией для быстрого старта и для незавершённой уборки.
 //
 // Общая база разложена так, чтобы двое могли отмечать дела одновременно, не затирая друг друга:
-//   home/state      — настройки дома (комнаты, питомцы, свои дела, напоминания…), целиком
+//   home/state      — настройки дома (комнаты, питомцы, свои дела, напоминания…); пишутся только изменённые поля
 //   home/last       — { taskId: когда сделано } — каждое дело отдельным полем
 //   log/<ГГГГ-ММ>   — { ключ записи: запись } — журнал по месяцам, записи отдельными полями
 // Удалённое поле записывается как null.
@@ -12,7 +12,7 @@ import { normalize } from './logic.js';
 import { makeHttpDb } from './remote.js';
 
 const KEY = 'uborka.v1';
-const SHARED = ['v', 'created', 'zonesOn', 'taskOff', 'every', 'household', 'merged', 'custom', 'when', 'remind', 'buddy', 'setup', 'pause', 'notes', 'fb'];
+const SHARED = ['v', 'created', 'zonesOn', 'taskOff', 'every', 'household', 'merged', 'custom', 'when', 'remind', 'buddy', 'setup', 'pause', 'notes', 'fb', 'assign', 'people'];
 const LOG_MONTHS = 3; // сколько месяцев журнала держать в памяти
 
 export let persistent = true;
@@ -107,6 +107,22 @@ const recentMonths = (now) => {
 const entryKey = () => 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const clean = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([, v]) => v !== null && v !== undefined));
 
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+// Разница в виде слияния (RFC 7396): null — удалить поле. Вложенные объекты (taskOff, every,
+// assign…) — по ключам, чтобы правки двух жильцов в разных ключах не мешали друг другу.
+// Массивы (custom) — целиком.
+export function diff(prev, next, deep = true) {
+  const out = {};
+  for (const k of new Set([...Object.keys(prev || {}), ...Object.keys(next || {})])) {
+    const a = prev ? prev[k] : undefined, b = next ? next[k] : undefined;
+    if (stable(a ?? null) === stable(b ?? null)) continue;
+    if (b === undefined || b === null) out[k] = null;
+    else if (deep && isObj(a) && isObj(b)) out[k] = diff(a, b, true);
+    else out[k] = b;
+  }
+  return out;
+}
+
 function queue(path, fn) {
   chains[path] = (chains[path] || Promise.resolve()).then(fn).catch(() => {});
   return chains[path];
@@ -137,11 +153,15 @@ async function ensure(path) {
 
 function sync(st) {
   // Настройки дома
+  // Только изменившиеся поля: целиком документ не пишем, иначе телефон со старой копией
+  // затирает то, что поменяли другой жилец или Claude.
   const stateObj = pick(st);
   const state = stable(stateObj);
   if (state !== synced.state) {
+    const prev = synced.state ? JSON.parse(synced.state) : null;
     synced.state = state;
-    queue('home/state', () => db.doc('home/state').set(stateObj));
+    const patch = prev ? diff(prev, stateObj) : stateObj;
+    if (patch && Object.keys(patch).length) merge('home/state', patch, () => {});
   }
   // Даты выполнения — только изменившиеся поля
   const prevLast = synced.last ? JSON.parse(synced.last) : {};

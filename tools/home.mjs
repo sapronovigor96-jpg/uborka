@@ -16,7 +16,8 @@
 //   node tools/home.mjs extras            — «сверх списка», ждущие оценки
 //   node tools/home.mjs extra-rate <id> <очки> [пояснение] — оценить
 //   node tools/home.mjs bonus <имя> <очки> <за что>          — начислить бонус
-//   node tools/home.mjs score             — счёт текущей недели
+//   node tools/home.mjs score             — счёт текущей недели (как в приложении)
+//   node tools/home.mjs assign <taskId> <имя|->   — закрепить дело за жильцом (- — общее)
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -110,17 +111,18 @@ async function main() {
     await api('PUT', '/doc?path=extra/' + id, { data: { kind: 'bonus', by: a, pts: Number(rest[0]), text: rest.slice(1).join(' '), at: Date.now(), status: 'rated' } });
     console.log('бонус начислен:', a, rest[0]);
   } else if (cmd === 'score') {
+    const L = await import('../js/logic.js');
     const all = await docs();
-    const d = new Date(Date.now() - 4 * 3600000);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    const from = d.getTime() + 4 * 3600000;
-    const board = {};
-    for (const doc of all.filter((x) => x.path.startsWith('log/')))
-      for (const e of Object.values(doc.data)) if (e && e.at >= from) (board[e.by || '?'] ||= 0), (board[e.by || '?'] += e.pts || 0);
-    for (const doc of all.filter((x) => x.path.startsWith('extra/')))
-      if (doc.data.status === 'rated' && doc.data.at >= from) (board[doc.data.by || '?'] ||= 0), (board[doc.data.by || '?'] += doc.data.pts || 0);
-    console.log('неделя с', time(from), JSON.stringify(board));
+    const state = all.find((x) => x.path === 'home/state');
+    const st = L.normalize({ ...(state ? state.data : {}), v: 1 }, Date.now());
+    st.log = all.filter((x) => x.path.startsWith('log/')).flatMap((x) => Object.values(x.data)).filter(Boolean);
+    const extras = all.filter((x) => x.path.startsWith('extra/')).map((x) => x.data);
+    const from = L.weekStart(Date.now());
+    for (const r of L.scoreboard(st, extras, from, from + 7 * L.DAY)) console.log((r.by || 'без имени').padEnd(10), r.pts, 'очк ·', r.tasks, 'дел ·', Math.round(r.minutes), 'мин');
+    console.log('неделя с', time(from));
+  } else if (cmd === 'assign') {
+    await api('PATCH', '/doc?path=home/state', { patch: { assign: { [a]: rest[0] && rest[0] !== '-' ? rest[0] : null } } });
+    console.log('готово');
   } else if (cmd === 'reply') {
     const text = rest.join(' ').trim();
     if (!a || !text) throw new Error('нужно: reply <id> <текст>');
