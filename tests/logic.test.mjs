@@ -396,3 +396,27 @@ test('составные дела разделены: в названии одн
   assert.equal(t('k-counters'), 'Протереть столешницу');
   assert.ok(TASKS.some((x) => x.id === 'k-splash') && TASKS.some((x) => x.id === 'l-leaves'));
 });
+
+test('свой план: предлагает дела, в том числе заранее; порядок — профи; реальное время — медиана замеров', () => {
+  const st = fresh();
+  L.startFrom(st, NOW, 2);
+  const pool = L.planPool(st, NOW);
+  assert.ok(pool.length > 0);
+  assert.ok(pool.every((x) => L.effEvery(x.t, st) > 1), 'ежедневных мелочей в плане нет');
+  st.assign[pool[0].t.id] = 'Маша';
+  st._me = 'Игорь';
+  assert.ok(!L.planPool(st, NOW).some((x) => x.t.id === pool[0].t.id), 'взятое Машей не предлагается');
+  const steps = L.planSteps(st, pool.slice(1, 4).map((x) => x.t.id));
+  assert.equal(steps.filter((x) => x.kind === 'task').length, 3);
+  const id = pool[1].t.id;
+  const P = pool[1].t.min;
+  for (const m of [P, P + 1, P * 2]) L.complete(st, id, NOW, m, true);
+  L.complete(st, id, NOW, P * 4, true); // забытый таймер — не считается
+  L.complete(st, id, NOW, 30, false);
+  const r = L.realTimes(st).find((x) => x.t.id === id);
+  assert.equal(r.real, P + 1);
+  assert.equal(r.n, 3);
+  assert.ok(!L.honest(0.5, 15), '«Готово» через полминуты у 15-минутного дела — не замер');
+  assert.ok(L.honest(0.5, 1));
+  assert.equal(st.log[st.log.length - 1].pts, L.points(pool[1].t), 'очки не зависят от времени');
+});

@@ -250,6 +250,33 @@ export function buildSession(st, now, budget, minUrg = DUE, zone = null) {
   return orderSteps(picked, st);
 }
 
+// Свой план: что предложить на выбор — сначала то, что пора, потом то, что можно заранее.
+// Взятое другим не предлагаем; ежедневные мелочи — в ритуалах, здесь их нет.
+export function planPool(st, now) {
+  return dueTasks(st, now, AHEAD)
+    .filter((x) => mine(x.t, st) && effEvery(x.t, st) > 1)
+    .map((x) => ({ ...x, due: x.u >= DUE }));
+}
+
+export function planSteps(st, ids) {
+  return orderSteps(ids.map((id) => task(st, id)).filter(Boolean), st);
+}
+
+// Сколько дела занимают на самом деле — по таймеру уборки (только честные замеры).
+export function realTimes(st) {
+  const by = new Map();
+  for (const e of st.log) if (e.real && typeof e.min === 'number' && honest(e.min, (task(st, e.id) || {}).min || 1)) (by.get(e.id) || by.set(e.id, []).get(e.id)).push(e);
+  const out = [];
+  for (const [id, es] of by) {
+    const t = task(st, id);
+    if (!t) continue;
+    const m = es.map((e) => e.min).sort((a, b) => a - b);
+    const median = m[Math.floor(m.length / 2)];
+    out.push({ t, plan: t.min, real: Math.round(median * 10) / 10, n: es.length, last: es[es.length - 1].at });
+  }
+  return out.sort((a, b) => Math.abs(b.real - b.plan) - Math.abs(a.real - a.plan) || b.n - a.n);
+}
+
 export function orderSteps(tasks, st) {
   const zo = (t) => zoneById[zoneOf(t, st)].order;
   const step = (kind, t) => ({ kind, id: t.id, zone: zoneOf(t, st), text: label(t, st, kind === 'prep' ? t.prep : t.t), min: kind === 'prep' ? 1 : effMin(t, st) });
@@ -303,11 +330,16 @@ export function undoComplete(st, taskId, prevLast) {
 }
 
 // Сколько дело занимает именно у вас: медиана последних 5 замеров таймером (нужно хотя бы 3).
+// Честный замер: не «Готово» сразу после старта (дело сделали раньше) и не забытый таймер.
+export function honest(min, planned) {
+  return min <= planned * 3 && (min >= 1 || min >= planned * 0.25);
+}
+
 export function effMin(t, st) {
   const real = [];
   for (let i = st.log.length - 1; i >= 0 && real.length < 5; i--) {
     const e = st.log[i];
-    if (e.id === t.id && e.real) real.push(e.min);
+    if (e.id === t.id && e.real && honest(e.min, t.min)) real.push(e.min);
   }
   if (real.length < 3) return t.min;
   real.sort((a, b) => a - b);

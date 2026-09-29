@@ -379,3 +379,14 @@ a.btn.primary { color: var(--acc-ink); }
 .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
 .confetti i { position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px; animation: fall 1.6s ease-in forwards; }
 @keyframes fall { to { transform: translateY(105vh) rotate(540deg); opacity: .6; } }
+
+/* Свой план */
+.tl.plan li:not(.is-on) .tt { color: var(--mut); }
+.plan-go { position: sticky; bottom: -1px; padding: 12px 0 4px; margin-top: 12px; background: linear-gradient(to bottom, transparent, var(--card) 30%); display: grid; gap: 8px; }
+
+/* Реальное время */
+.tl.real li { align-items: center; }
+.real-v { text-align: right; white-space: nowrap; display: flex; flex-direction: column; }
+.real-v small { font-size: 12px; opacity: .7; }
+.real-v.fast b { color: var(--ok); }
+.real-v.slow b { color: var(--acc); }

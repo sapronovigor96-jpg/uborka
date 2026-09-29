@@ -329,6 +329,7 @@ function renderNow() {
     <div class="sec-title">${ritualNow ? 'Или уборка на время' : eveningDone ? 'Сколько есть времени?' : 'Есть больше времени?'}</div>
     <div class="budgets three">${budgets}</div>
     ${L.buildSession(st, t, 60).length === 0 ? `<button class="btn wide ghost" style="margin-top:10px" data-act="start-ahead">Сделать что-нибудь заранее · 15 мин</button>` : ''}
+    <button class="btn wide ghost" style="margin-top:10px" data-act="plan-open">Собрать план самому</button>
     <div class="rooms-pick"><span class="mut small">Или одна комната:</span>
       <div class="chips">${zones
         .filter((z) => z.id !== 'home')
@@ -849,6 +850,9 @@ function confetti() {
 
 let extras = [];
 let extraOpen = false;
+let planOpen = false;
+let realAll = false;
+const planSel = new Set(); // свой план: выбранные дела
 const extraList = () => (S.shared ? extras : st.extra || []);
 const WEEK = 7 * L.DAY;
 
@@ -912,14 +916,67 @@ function renderScore() {
         .map(({ f, b }) => `<li><span class="tt">${weekLabel(f)}<small>${b.map((r) => `${esc(r.by || 'без имени')}: ${r.pts}`).join(' · ')}</small></span><b>${b.length > 1 && b[0].pts > b[1].pts ? '♛ ' + esc(b[0].by || '') : b.length > 1 ? 'ничья' : ''}</b></li>`)
         .join('')}</ul></div>` : ''}
 
+    ${realBlock()}
+
     <details class="card rules"><summary class="small">Как считаются очки</summary>
       <ul class="small mut">
         <li>Дело из списка: минуты по оценке × сложность. Лёгкое ×1, грязное или с химией ×1,5, тяжёлое ×2.</li>
+        <li>Очки не зависят от таймера: сделали быстрее — очков столько же. Растягивать дело ради очков незачем.</li>
         <li>«Уже сделано» — то, что сделали заодно, сверх плана: +25%.</li>
         <li>Сверх списка — присылаете, что сделали и сколько минут, Claude оценивает.</li>
         <li>Новое регулярное дело (через «Входящие» или сверх списка) — +${L.NEW_TASK_BONUS} автору.</li>
         <li>Неделя — с понедельника 4:00 до следующего понедельника.</li>
       </ul></details>`;
+}
+
+// Свой план: сам выбираешь дела из предложенных, приложение расставляет их по порядку профи.
+function renderPlan() {
+  const pool = L.planPool(st, now());
+  for (const id of [...planSel]) if (!pool.some((x) => x.t.id === id)) planSel.delete(id);
+  const picked = pool.filter((x) => planSel.has(x.t.id));
+  const mins = picked.reduce((a, x) => a + L.effMin(x.t, st) + (x.t.prep ? 1 : 0), 0);
+  const byZone = new Map();
+  for (const x of pool) {
+    const z = L.zoneOf(x.t, st);
+    (byZone.get(z) || byZone.set(z, []).get(z)).push(x);
+  }
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+    <h2>Свой план</h2>
+    <p class="small mut">Отметьте, что хочется сделать. Порядок приложение расставит само: сначала то, что должно отмокать, пол — в конце.</p>
+    ${pool.length ? [...byZone]
+      .map(([z, xs]) => `<div class="sec-title">${esc(zname(z))}</div>
+        <ul class="tl plan">${xs
+          .map((x) => {
+            const on = planSel.has(x.t.id);
+            return `<li class="${on ? 'is-on' : ''}"><button class="check ${on ? 'done' : ''}" data-act="plan-toggle" data-id="${x.t.id}" aria-label="Выбрать">✓</button>
+              <button class="tt" data-act="plan-toggle" data-id="${x.t.id}">${esc(tname(x.t))}<small>${x.due ? 'пора' : 'можно заранее'} · ${L.effMin(x.t, st)} мин</small></button></li>`;
+          })
+          .join('')}</ul>`)
+      .join('') : '<div class="card mut small">Сейчас всё в порядке — предложить нечего.</div>'}
+    <div class="plan-go">
+      <button class="btn wide primary" data-act="plan-start" ${picked.length ? '' : 'disabled'}>${picked.length ? `Начать · ${dela(picked.length)} · ~${mins} мин` : 'Выберите дела'}</button>
+      ${picked.length ? '<button class="btn wide ghost" data-act="plan-clear">Снять выбор</button>' : ''}
+    </div>`;
+}
+
+// Реальное время по таймеру уборки — чтобы видеть, сколько дела занимают на самом деле.
+function realBlock() {
+  const rows = L.realTimes(st);
+  const fmt = (m) => (m < 1 ? '<1' : String(Math.round(m)).replace('.', ','));
+  return `<div class="sec-title">Сколько занимает на самом деле</div>
+    <div class="card">${rows.length
+      ? `<ul class="tl real">${rows
+          .slice(0, realAll ? rows.length : 8)
+          .map((r) => {
+            const d = r.real - r.plan;
+            const tag = Math.abs(d) < 1 ? 'как в плане' : d < 0 ? 'быстрее' : 'дольше';
+            return `<li><span class="tt">${esc(tname(r.t))}<small>план ${r.plan} мин · замеров: ${r.n}</small></span>
+              <span class="real-v ${Math.abs(d) < 1 ? '' : d < 0 ? 'fast' : 'slow'}"><b>${fmt(r.real)} мин</b><small>${tag}</small></span></li>`;
+          })
+          .join('')}</ul>
+        ${rows.length > 8 ? `<button class="more" data-act="real-all">${realAll ? 'Свернуть' : `Все ${rows.length}`}</button>` : ''}
+        <p class="small mut" style="margin:8px 0 0">Время берётся из таймера уборки. После трёх замеров приложение само подстраивает минуты дела в планах; очки остаются по плану.</p>`
+      : '<span class="mut small">Пока нет замеров. Время запишется, когда вы делаете дела через «Начать» — там идёт таймер.</span>'}</div>`;
 }
 
 function renderExtra() {
@@ -1223,6 +1280,7 @@ function closeSheet() {
   inboxOpen = false;
   projectOpen = null;
   extraOpen = false;
+  planOpen = false;
   $('#sheet').hidden = true;
   $('#sheet-bg').hidden = true;
 }
@@ -1308,8 +1366,11 @@ const ambient = {
 /* ---------- режим уборки ---------- */
 
 function startSession(budget, minUrg, zone) {
+  startSteps(L.buildSession(st, now(), budget, minUrg ?? L.DUE, zone || null));
+}
+
+function startSteps(steps) {
   closeSheet();
-  const steps = L.buildSession(st, now(), budget, minUrg ?? L.DUE, zone || null);
   if (!steps.length) return;
   // Короткую уборку начинаем сразу: лишний экран перед стартом съедает решимость.
   const quick = L.sessionMinutes(steps) <= 6;
@@ -1547,7 +1608,7 @@ function sessionAct(act, el) {
     } else {
       // Замер таймера учит приложение. Если шаг затянулся втрое — скорее отвлеклись, пишем оценку.
       const spent = (now() - ss.stepStart) / 60000;
-      const real = spent <= step.min * 3;
+      const real = L.honest(spent, step.min);
       const min = real ? Math.max(0.5, Math.round(spent * 10) / 10) : step.min;
       L.complete(st, step.id, now(), min, real);
       ss.doneIds[step.id] = true;
@@ -1800,6 +1861,28 @@ document.addEventListener('click', (e) => {
       return startSession(Number(el.dataset.b));
     case 'start-ahead':
       return startSession(15, 0);
+    case 'plan-open':
+      planOpen = true;
+      renderPlan();
+      return openSheetEl();
+    case 'plan-toggle': {
+      const sc = $('#sheet').scrollTop;
+      planSel.has(id) ? planSel.delete(id) : planSel.add(id);
+      renderPlan();
+      $('#sheet').scrollTop = sc;
+      return buzz(10);
+    }
+    case 'real-all':
+      realAll = !realAll;
+      return render();
+    case 'plan-clear':
+      planSel.clear();
+      return renderPlan();
+    case 'plan-start': {
+      const steps = L.planSteps(st, [...planSel]);
+      planSel.clear();
+      return startSteps(steps);
+    }
     case 'task':
       return openSheet(id);
     case 'done':
