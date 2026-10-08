@@ -18,6 +18,9 @@
 //   node tools/home.mjs bonus <имя> <очки> <за что>          — начислить бонус
 //   node tools/home.mjs score             — счёт текущей недели (как в приложении)
 //   node tools/home.mjs assign <taskId> <имя|->   — закрепить дело за жильцом (- — общее)
+//   node tools/home.mjs plan-add <файл.json> — план уборки по фото { title, note?, steps: [{ z, t, min, id?, hint? }] }
+//        шаги — в порядке выполнения; id — дело из списка, если шаг его закрывает (тогда оно засчитается)
+//   node tools/home.mjs plans             — планы по фото и прогресс
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -94,6 +97,16 @@ async function main() {
       data: { title: spec.title, why: spec.why || '', steps: spec.steps.map((t) => ({ t, done: false })), status: 'open', at: Date.now() },
     });
     console.log('проект добавлен:', id, spec.title);
+  } else if (cmd === 'plan-add') {
+    const spec = JSON.parse(readFileSync(a, 'utf8'));
+    for (const s of spec.steps) for (const f of ['z', 't', 'min']) if (!s[f]) throw new Error(`шаг «${s.t || '?'}»: нет поля ${f}`);
+    const id = 'f' + Date.now().toString(36);
+    await api('PUT', '/doc?path=plans/' + id, { data: { title: spec.title, note: spec.note || '', steps: spec.steps, done: {}, status: 'open', at: Date.now() } });
+    console.log('план добавлен:', id, spec.title, '·', spec.steps.length, 'шагов ·', spec.steps.reduce((n, s) => n + s.min, 0), 'мин');
+  } else if (cmd === 'plans') {
+    const ps = (await docs()).filter((d) => d.path.startsWith('plans/')).map((d) => ({ id: d.path.slice(6), ...d.data }));
+    if (!ps.length) console.log('Планов нет.');
+    for (const p of ps) console.log(`[${p.id}] ${p.status} ${p.title} — ${Object.keys(p.done || {}).length}/${p.steps.length}`);
   } else if (cmd === 'projects') {
     const ps = (await docs()).filter((d) => d.path.startsWith('projects/')).map((d) => ({ id: d.path.slice(9), ...d.data }));
     if (!ps.length) console.log('Проектов нет.');

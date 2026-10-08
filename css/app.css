@@ -241,7 +241,12 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; letter-spac
 .s-hint { color: var(--mut); }
 .s-warn { background: var(--warn-soft); color: var(--warn); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
 .s-wait { background: var(--acc-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
-.s-timer { font-size: 14px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.s-timer { display: grid; gap: 2px; justify-items: center; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.s-timer b { font: 600 clamp(56px, 19vw, 84px)/1 var(--serif); color: var(--txt); letter-spacing: -0.02em; }
+.s-timer small { font-size: 14px; color: var(--dim); text-align: center; }
+.s-timer.idle b { color: var(--dim); opacity: 0.55; }
+.photo-plan { display: grid; gap: 8px; margin-top: 14px; border-color: var(--acc); }
+.photo-plan .link { justify-self: center; }
 .cheer { color: var(--ok); font: italic 500 17px var(--serif); animation: cheer 2.6s ease forwards; }
 @keyframes cheer { 0% { opacity: 0; transform: translateY(6px); } 15%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; } }
 .s-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

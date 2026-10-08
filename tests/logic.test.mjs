@@ -420,3 +420,12 @@ test('свой план: предлагает дела, в том числе з�
   assert.ok(L.honest(0.5, 1));
   assert.equal(st.log[st.log.length - 1].pts, L.points(pool[1].t), 'очки не зависят от времени');
 });
+
+test('план по фото: шаги из списка и разовые, сделанное не повторяется', () => {
+  const st = fresh();
+  const plan = { id: 'f1', steps: [{ z: 'bath', t: 'Полотенце с пола — в стирку', min: 1 }, { z: 'kitchen', t: 'Плита', min: 3, id: 'k-hob' }, { z: 'hall', t: 'Коробку к двери', min: 2, id: 'нет-такого' }], done: { 0: true } };
+  const steps = L.photoSteps(plan, st);
+  assert.deepEqual(steps.map((s) => [s.id, s.adhoc, s.pi]), [['k-hob', false, 1], ['pl-f1-2', true, 2]]);
+  assert.equal(L.sessionMinutes(steps), 5);
+  assert.ok(Array.isArray(L.sessionKit(steps, st)), 'корзинка собирается и для разовых шагов');
+});

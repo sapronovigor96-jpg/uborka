@@ -323,6 +323,7 @@ function renderNow() {
       <div class="mut small">${back ? 'Ничего не потеряно — начнём с малого' : `Свет горит в ${lit} из ${zones.length} ${L.plural(zones.length, 'комнаты', 'комнат', 'комнат')}`}</div>
     </div>
     ${say(...buddyLine)}
+    ${photoCards()}
     ${mainBtn}
 
     ${eveningDone && !restMore ? '' : `
@@ -330,6 +331,7 @@ function renderNow() {
     <div class="budgets three">${budgets}</div>
     ${L.buildSession(st, t, 60).length === 0 ? `<button class="btn wide ghost" style="margin-top:10px" data-act="start-ahead">Сделать что-нибудь заранее · 15 мин</button>` : ''}
     <button class="btn wide ghost" style="margin-top:10px" data-act="plan-open">Собрать план самому</button>
+    ${S.shared ? '<button class="btn wide ghost" style="margin-top:10px" data-act="photo-how">План по фото от Claude</button>' : ''}
     <div class="rooms-pick"><span class="mut small">Или одна комната:</span>
       <div class="chips">${zones
         .filter((z) => z.id !== 'home')
@@ -579,6 +581,10 @@ async function startChat() {
     extras = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     if (tab === 'score' && !st.session) render();
     if (extraOpen) renderExtra();
+  });
+  db.collection('plans').orderBy('at').limit(20).onSnapshot((snap) => {
+    plans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (tab === 'now' && !st.session) render();
   });
   db.collection('projects').orderBy('at').limit(50).onSnapshot((snap) => {
     projects = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -851,6 +857,7 @@ function confetti() {
 let extras = [];
 let extraOpen = false;
 let planOpen = false;
+let plans = []; // планы по фото от Claude: plans/<id> { title, note, steps, done, status, at }
 let realAll = false;
 const planSel = new Set(); // свой план: выбранные дела
 const extraList = () => (S.shared ? extras : st.extra || []);
@@ -927,6 +934,55 @@ function renderScore() {
         <li>Новое регулярное дело (через «Входящие» или сверх списка) — +${L.NEW_TASK_BONUS} автору.</li>
         <li>Неделя — с понедельника 4:00 до следующего понедельника.</li>
       </ul></details>`;
+}
+
+// План по фото: Claude посмотрел снимки комнат и расписал шаги. Остаётся идти по ним.
+const planList = () => (S.shared ? plans : st.plans || []);
+
+function photoCards() {
+  return planList()
+    .filter((p) => p.status === 'open')
+    .map((p) => {
+      const left = L.photoSteps(p, st);
+      if (!left.length) return '';
+      const all = (p.steps || []).length;
+      return `<div class="card photo-plan">
+        <div class="small mut">План по фото${all > left.length ? ` · сделано ${all - left.length} из ${all}` : ''}</div>
+        <b>${esc(p.title || 'Уборка по фото')}</b>
+        ${p.note ? `<div class="small mut">${esc(p.note)}</div>` : ''}
+        <button class="btn primary wide" data-act="photo-start" data-id="${p.id}">${all > left.length ? 'Продолжить' : 'Начать'} · ${left.length} ${L.plural(left.length, 'шаг', 'шага', 'шагов')} · ~${L.sessionMinutes(left)} мин</button>
+        <button class="link" data-act="photo-drop" data-id="${p.id}">Убрать план</button>
+      </div>`;
+    })
+    .join('');
+}
+
+// Отметить шаг плана в общей базе. Разовые шаги дают очки по плановым минутам —
+// одной строкой на человека и план, чтобы не засорять «Итоги».
+function photoPoints(step, sign) {
+  if (!S.shared) {
+    const lp = planList().find((x) => x.id === step.plan);
+    if (lp) lp.done = { ...(lp.done || {}), [step.pi]: sign > 0 };
+    return;
+  }
+  const db = S.database();
+  const p = plans.find((x) => x.id === step.plan);
+  db.doc('plans/' + step.plan).update({ done: { [step.pi]: sign > 0 ? true : null } });
+  if (p) {
+    p.done = { ...(p.done || {}) };
+    sign > 0 ? (p.done[step.pi] = true) : delete p.done[step.pi];
+    if (!L.photoSteps(p, st).length) db.doc('plans/' + step.plan).update({ status: 'done' });
+  }
+  if (!step.adhoc) return;
+  const me = S.me || '';
+  const id = 'pp' + step.plan + '-' + [...me].reduce((a, c) => a + c.charCodeAt(0), 0).toString(36);
+  const cur = extras.find((x) => x.id === id) || { pts: 0, n: 0 };
+  const n = Math.max(0, (cur.n || 0) + sign);
+  const pts = Math.max(0, (cur.pts || 0) + sign * step.min);
+  const item = { kind: 'bonus', by: me, pts, n, text: `План по фото: ${(p && p.title) || 'уборка'} · ${n} ${L.plural(n, 'шаг', 'шага', 'шагов')}`, at: now(), status: 'rated' };
+  const i = extras.findIndex((x) => x.id === id);
+  i >= 0 ? (extras[i] = { id, ...item }) : extras.push({ id, ...item });
+  db.doc('extra/' + id).set(item);
 }
 
 // Свой план: сам выбираешь дела из предложенных, приложение расставляет их по порядку профи.
@@ -1451,10 +1507,12 @@ function renderSession() {
   ss.doneIds = ss.doneIds || {};
   ss.mins = ss.mins || {};
   const step = ss.steps[ss.idx];
-  const t = L.task(st, step.id);
+  const t = L.task(st, step.id) || { id: step.id, t: step.text, z: step.zone, hint: step.hint };
+  const timed = step.kind === 'task';
+  const idle = timed && !ss.run; // шаг открыт, таймер ещё не запущен
   const paused = !!ss.pausedAt;
   // Долго не было (прогулка, звонок) — встречаем и начинаем шаг заново, а не показываем «45:08».
-  const away = !paused && now() - ss.stepStart > Math.max(15, step.min * 3) * 60000;
+  const away = !paused && !idle && now() - ss.stepStart > Math.max(15, step.min * 3) * 60000;
   if (away) {
     ss.stepStart = now();
     cheer = 'С возвращением — продолжим';
@@ -1465,14 +1523,14 @@ function renderSession() {
   const hasLater = ss.idx < ss.steps.length - 1;
   const prev = ss.steps[ss.idx - 1];
   const moved = step.kind === 'task' && prev && prev.kind === 'task' && prev.zone !== step.zone;
-  const kit = step.kind === 'task' ? L.kitFor(t) : [];
+  const kit = step.kind === 'task' && !step.adhoc ? L.kitFor(t) : [];
   const isDone = step.kind === 'task' && ss.doneIds[step.id];
   const w = step.kind === 'task' ? L.why(t) : null;
 
   const top = `<div class="s-top">
       <button class="icon-btn" data-act="s-back" ${ss.idx ? '' : 'disabled'} aria-label="Предыдущий шаг">‹</button>
       <span class="s-tools">
-        <button class="icon-btn ${paused ? 'on' : ''}" data-act="s-pause" aria-label="Пауза">${paused ? '▶' : 'Ⅱ'}</button>
+        <button class="icon-btn ${paused ? 'on' : ''}" data-act="s-pause" ${idle ? 'disabled' : ''} aria-label="Пауза">${paused ? '▶' : 'Ⅱ'}</button>
         <button class="icon-btn" data-act="note" aria-label="Что неудобно">✎</button>
         ${soundBtn()}
       </span></div>
@@ -1520,17 +1578,19 @@ function renderSession() {
       ${t.warn ? `<div class="s-warn">${esc(t.warn)}</div>` : ''}
       ${waitLeft > 0 ? `<div class="s-wait">Средство ещё действует: <b id="wait-left">${mmss(waitLeft)}</b>${hasLater ? ' — можно вернуться к этому позже.' : ''}</div>` : ''}
       ${w ? `<div class="s-why skip">Если пропустить: ${esc(w[1])}</div>` : ''}
-      <div class="s-timer" id="s-timer">${timerText(step)}</div>
+      ${timed ? `<div class="s-timer ${idle ? 'idle' : ''}" id="s-timer">${timerText(step)}</div>` : ''}
     </div>
     <div class="s-actions">
-      <button class="btn primary" data-act="s-done">${step.kind === 'prep' ? 'Нанесено' : 'Готово'}</button>
+      ${idle
+        ? '<button class="btn primary" data-act="s-run">▶ Старт</button>'
+        : `<button class="btn primary" data-act="s-done">${step.kind === 'prep' ? 'Нанесено' : 'Готово'}</button>`}
       <div class="s-row">
         <button class="btn" data-act="s-later" ${hasLater ? '' : 'disabled'}>Позже</button>
         ${step.kind === 'task' ? '<button class="btn" data-act="s-already">Уже сделано</button>' : ''}
         <button class="btn ghost" data-act="s-skip">Пропустить</button>
       </div>
       <div class="s-links">
-        ${step.kind === 'task' ? '<button class="link" data-act="task" data-id="' + step.id + '">Оценить дело</button>' : ''}
+        ${step.kind === 'task' && !step.adhoc ? '<button class="link" data-act="task" data-id="' + step.id + '">Оценить дело</button>' : ''}
         <button class="link" data-act="s-stop">Хватит на сегодня</button>
       </div>
     </div>`);
@@ -1550,10 +1610,11 @@ function renderSession() {
 
 // «1:20 из ~5 мин», а когда дольше оценки — спокойный отсчёт сверх неё.
 function timerText(step) {
+  if (!st.session.run) return `<b>0:00</b><small>по плану ~${step.min} мин · время пойдёт по кнопке «Старт»</small>`;
   const el = now() - st.session.stepStart;
   const est = step.min * 60000;
-  if (el <= est) return `${mmss(el)} из ~${step.min} мин`;
-  return `~${step.min} мин и ещё <span class="over">+${mmss(el - est)}</span>`;
+  if (el <= est) return `<b>${mmss(el)}</b><small>из ~${step.min} мин</small>`;
+  return `<b>${mmss(el)}</b><small>по плану ~${step.min} мин · <span class="over">+${mmss(el - est)}</span></small>`;
 }
 
 function openStepList() {
@@ -1592,6 +1653,13 @@ function sessionAct(act, el) {
     commit();
     return renderSession();
   }
+  if (act === 's-run') {
+    ss.run = true;
+    ss.stepStart = now();
+    buzz(20);
+    commit();
+    return renderSession();
+  }
   if (act === 's-go') {
     ss.ready = true;
     ss.stepStart = now();
@@ -1610,24 +1678,26 @@ function sessionAct(act, el) {
       const spent = (now() - ss.stepStart) / 60000;
       const real = L.honest(spent, step.min);
       const min = real ? Math.max(0.5, Math.round(spent * 10) / 10) : step.min;
-      L.complete(st, step.id, now(), min, real);
+      if (!step.adhoc) L.complete(st, step.id, now(), min, real);
+      if (step.plan) photoPoints(step, 1);
       ss.doneIds[step.id] = true;
       ss.mins[step.id] = min;
       ss.done++;
       ss.min += min;
       ss.zones.push(step.zone);
-      cheer = `${pick(AFTER)} · +${L.entryPoints(st, st.log[st.log.length - 1])}`;
+      cheer = `${pick(AFTER)} · +${step.adhoc ? step.min : L.entryPoints(st, st.log[st.log.length - 1])}`;
     }
     buzz(30);
     ss.idx++;
   } else if (act === 's-already') {
     // Сделано раньше, без таймера: засчитываем, но не учимся на времени. Для будущих очков — отдельный признак.
-    L.complete(st, step.id, now(), step.min, false, true);
+    if (!step.adhoc) L.complete(st, step.id, now(), step.min, false, true);
+    if (step.plan) photoPoints(step, 1);
     ss.doneIds[step.id] = true;
     ss.mins[step.id] = 0;
     ss.done++;
     ss.zones.push(step.zone);
-    cheer = `Отлично, одним делом меньше · +${L.entryPoints(st, st.log[st.log.length - 1])}`;
+    cheer = `Отлично, одним делом меньше · +${step.adhoc ? step.min : L.entryPoints(st, st.log[st.log.length - 1])}`;
     ss.idx++;
   } else if (act === 's-next') {
     ss.idx++;
@@ -1637,7 +1707,8 @@ function sessionAct(act, el) {
     ss.idx = Number(el.dataset.i);
     closeSheet();
   } else if (act === 's-unmark') {
-    L.undoComplete(st, step.id);
+    if (!step.adhoc) L.undoComplete(st, step.id);
+    if (step.plan) photoPoints(step, -1);
     delete ss.doneIds[step.id];
     ss.done--;
     ss.min -= ss.mins[step.id] || 0;
@@ -1663,6 +1734,7 @@ function sessionAct(act, el) {
     while (ss.idx < ss.steps.length && ss.steps[ss.idx].kind === 'task' && ss.doneIds[ss.steps[ss.idx].id]) ss.idx++;
   }
   ss.stepStart = now();
+  ss.run = false; // новый шаг ждёт кнопки «Старт»
   commit();
   renderSession();
 }
@@ -1864,6 +1936,26 @@ document.addEventListener('click', (e) => {
     case 'plan-open':
       planOpen = true;
       renderPlan();
+      return openSheetEl();
+    case 'photo-start': {
+      const p = planList().find((x) => x.id === id);
+      return p && startSteps(L.photoSteps(p, st));
+    }
+    case 'photo-drop':
+      if (!confirm('Убрать этот план? Сделанное останется засчитанным.')) return;
+      S.database().doc('plans/' + id).update({ status: 'dropped' });
+      plans = plans.filter((x) => x.id !== id);
+      return render();
+    case 'photo-how':
+      $('#sheet').innerHTML = `<button class="sheet-x" data-act="sheet-close" aria-label="Закрыть">×</button>
+        <h2>План по фото</h2>
+        <ol class="small" style="padding-left:18px;line-height:1.6">
+          <li>Сфотографируйте комнаты как есть — по одному снимку на комнату.</li>
+          <li>Отправьте снимки Claude в чат на компьютере и напишите «план».</li>
+          <li>Claude распишет шаги по порядку — план появится здесь, на вкладке «Сейчас».</li>
+          <li>Нажмите «Начать» и идите по шагам. Можно прерваться: план запомнит, что сделано.</li>
+        </ol>
+        <p class="small mut">План общий: шаги, которые сделал один, у другого уже отмечены.</p>`;
       return openSheetEl();
     case 'plan-toggle': {
       const sc = $('#sheet').scrollTop;

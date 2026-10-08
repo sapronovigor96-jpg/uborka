@@ -149,8 +149,20 @@ export function kitFor(t) {
 
 export function sessionKit(steps, st) {
   const seen = new Set();
-  for (const s of steps) for (const k of kitFor(task(st, s.id))) seen.add(k);
+  for (const s of steps) for (const k of task(st, s.id) ? kitFor(task(st, s.id)) : []) seen.add(k);
   return [...seen];
+}
+
+// План по фото: Claude смотрит снимки и пишет шаги { z, t, min, id?, hint? } — в порядке выполнения.
+// Шаг с id — дело из списка (засчитывается как обычное), без id — разовое, только для этого плана.
+// done — карта { индекс: true }: кто-то из двоих шаг уже сделал.
+export function photoSteps(plan, st) {
+  return (plan.steps || [])
+    .map((s, i) => {
+      const known = s.id && task(st, s.id);
+      return { kind: 'task', id: known ? s.id : `pl-${plan.id}-${i}`, zone: s.z, text: s.t, min: s.min || 2, hint: s.hint || '', plan: plan.id, pi: i, adhoc: !known };
+    })
+    .filter((s) => !(plan.done || {})[s.pi]);
 }
 
 // Время «стоит» во время отпуска.
