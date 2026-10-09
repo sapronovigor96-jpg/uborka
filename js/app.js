@@ -2090,6 +2090,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target;
   const act = el.dataset.act;
+  if (act === 'pack' || act === 'import') picking = 0;
   if (act === 'own-soon') {
     form.soon = el.checked;
     return;
@@ -2171,9 +2172,24 @@ document.addEventListener(
   true,
 );
 
+// На Android выбор файла открывается отдельным экраном: перерисовка по возвращении
+// заменила бы input раньше его события change, и файл потерялся бы.
+let picking = 0;
+document.addEventListener(
+  'click',
+  (e) => {
+    if (e.target.matches && e.target.matches('input[type=file]')) picking = Date.now();
+  },
+  true,
+);
+
 // Вернулись в приложение (например, утром) — пересчитать сроки.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  if (picking && Date.now() - picking < 600000) {
+    picking = 0;
+    return;
+  }
   if (st.session) {
     if (st.session.ready) lockScreen(true);
     renderSession();
