@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --test-concurrency=1 --test-force-exit tests/*.test.mjs"
+    "test": "node --test --test-concurrency=1 --test-force-exit tests/*.test.mjs",
+    "pack": "node tools/make-pack.mjs"
+  },
+  "devDependencies": {
+    "opentype.js": "1.3.4",
+    "pngjs": "7.0.0",
+    "xnb": "1.3.0-a"
   }
 }

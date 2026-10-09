@@ -1,5 +1,6 @@
 import * as L from './logic.js';
 import * as S from './store.js';
+import * as K from './skin.js';
 
 const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
@@ -95,6 +96,34 @@ function house(zones, glowZones = []) {
     ${wins}
     <path d="M26 ${bottom}h148" class="ground"/>
   </svg>`;
+}
+
+// Питомцы рядом с домиком — видны только в пиксельной теме с пакетом игры.
+function petsHtml() {
+  const h = st.household;
+  if (!h.dog && !h.cat) return '';
+  return `<div class="pets" aria-hidden="true">${h.dog ? '<i class="pet dog"></i>' : '<i></i>'}${h.cat ? '<i class="pet cat"></i>' : ''}</div>`;
+}
+
+function lookHtml() {
+  const h = st.household;
+  const look = K.petLook();
+  const row = (kind, title) => `<div class="row"><div>${esc(title)}</div><div class="chips">${[0, 1, 2, 3, 4]
+    .map((i) => `<button class="chip look ${look[kind] === i ? 'on' : ''}" data-act="pet-look" data-k="${kind}" data-v="${i}" aria-label="Вариант ${i + 1}"><i style="background-image:var(--g-${kind}${i})"></i></button>`)
+    .join('')}</div></div>`;
+  return (h.dog ? row('dog', h.dogName || 'Собака') : '') + (h.cat ? row('cat', h.catName || 'Кошка') : '');
+}
+
+function skinSection() {
+  const pixel = K.skin() === 'pixel';
+  return `<div class="sec-title">Вид</div>
+    <div class="card">
+      <div class="row"><div>Пиксельный стиль<small>День или ночь — как тема телефона</small></div>${sw('skin', pixel)}</div>
+      ${pixel ? `<div class="row"><div>Пакет игры<small>${K.pack ? 'Загружен: шрифты, рамки и питомцы из Stardew' : 'Шрифты, рамки и питомцы из Stardew. Хранится только на этом телефоне'}</small></div></div>
+        ${K.pack ? lookHtml() : ''}
+        <label class="btn wide">${K.pack ? 'Заменить пакет' : 'Загрузить пакет игры'}<input type="file" accept="application/json,.json" data-act="pack" hidden></label>
+        ${K.pack ? `<button class="btn wide ghost confirm" data-act="pack-del">${armed === 'pack-del' ? 'Точно убрать пакет? Нажмите ещё раз' : 'Убрать пакет с телефона'}</button>` : ''}` : ''}
+    </div>`;
 }
 
 function toast(text, undo) {
@@ -319,6 +348,7 @@ function renderNow() {
     <div class="hello mut">${greeting()}</div>
     <div class="hero">
       ${house(zones)}
+      ${petsHtml()}
       <h1>${title}</h1>
       <div class="mut small">${back ? 'Ничего не потеряно — начнём с малого' : `Свет горит в ${lit} из ${zones.length} ${L.plural(zones.length, 'комнаты', 'комнат', 'комнат')}`}</div>
     </div>
@@ -438,6 +468,7 @@ function renderSettings() {
       <div class="row"><div>${title}<small>${sub}</small></div>${sw('rt-on', r[k].on, `data-k="${k}"`)}</div>
       ${r[k].on ? `<div class="rem-ctl">${extra}<input class="field time" type="time" data-act="rt-time" data-k="${k}" value="${r[k].time}"></div>` : ''}</div>`;
   view.innerHTML = `<h1 class="page-title">Настройки</h1>
+    ${skinSection()}
 
     <div class="sec-title">Что неудобно <span class="count">${openNotes.length ? openNotes.length : ''}</span></div>
     <div class="card">
@@ -502,7 +533,7 @@ function renderSettings() {
       <button class="btn wide ghost confirm" data-act="reset-marks">${armed === 'reset-marks' ? 'Точно сбросить? Нажмите ещё раз' : 'Сбросить отметки'}</button>
     </div>
     <button class="btn wide ghost" style="margin-top:16px" data-act="setup-again">Пройти знакомство заново</button>
-    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.9</p>`;
+    <p class="small dim" style="text-align:center;margin-top:24px">Уборка · версия 0.13</p>`;
 }
 
 /* ---------- лист задачи ---------- */
@@ -1774,6 +1805,12 @@ document.addEventListener('click', (e) => {
   switch (act) {
     case 'kit':
       return el.classList.toggle('got');
+    case 'pet-look':
+      K.setPetLook(el.dataset.k, Number(el.dataset.v));
+      return render();
+    case 'pack-del':
+      if (!arm('pack-del')) return render();
+      return K.removePack().then(() => location.reload());
     case 'room': {
       const on = !roomOn(el.dataset.z);
       L.setZone(st, el.dataset.z, on, now());
@@ -2057,6 +2094,21 @@ document.addEventListener('change', (e) => {
     form.soon = el.checked;
     return;
   }
+  if (act === 'skin') {
+    K.setSkin(el.checked ? 'pixel' : 'classic');
+    return render();
+  }
+  if (act === 'pack') {
+    const f = el.files[0];
+    if (!f) return;
+    K.installPack(f)
+      .then(() => {
+        render();
+        toast('Пакет игры загружен');
+      })
+      .catch(() => toast('Это не пакет игры — нужен файл stardew-pack.json'));
+    return;
+  }
   if (act === 'rt-on') st.remind[el.dataset.k].on = el.checked;
   else if (act === 'rt-time') st.remind[el.dataset.k].time = el.value || st.remind[el.dataset.k].time;
   else if (act === 'rt-day') st.remind.weekly.day = Number(el.value);
@@ -2132,6 +2184,8 @@ if (!icsFromHash()) {
   render();
   if (st.session) renderSession();
 }
+// Пакет игры поднимается из памяти телефона чуть позже первого кадра — потом перерисовать.
+K.loadPack().then(() => K.pack && !st.session && render());
 S.askPersist();
 
 // Внутри Claude: подключаем общую базу и чат. Чужие отметки приходят сами и перерисовывают экран.

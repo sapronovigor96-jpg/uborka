@@ -3,3 +3,5 @@ node_modules/
 .env
 server/.wrangler/
 CLAUDE.md
+# Пакет игры (файлы Stardew) — только для своего телефона, не публиковать
+stardew-pack.json
