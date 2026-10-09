@@ -2106,7 +2106,7 @@ document.addEventListener('change', (e) => {
         render();
         toast('Пакет игры загружен');
       })
-      .catch(() => toast('Это не пакет игры — нужен файл stardew-pack.json'));
+      .catch((e) => toast(e instanceof SyntaxError || e.message === 'not a pack' ? 'Это не пакет игры — нужен файл stardew-pack.json' : `Пакет не сохранился: ${e.message || e.name}`));
     return;
   }
   if (act === 'rt-on') st.remind[el.dataset.k].on = el.checked;

@@ -87,10 +87,14 @@ async function use(p) {
   if (!p || p.format !== 'uborka-pack' || !p.fonts || !p.img) throw new Error('not a pack');
   const fonts = [];
   for (const [name, data] of Object.entries(p.fonts)) {
-    const face = new FontFace(name, b64buf(data), { display: 'block' });
-    await face.load();
-    document.fonts.add(face);
-    fonts.push(name);
+    try {
+      const face = new FontFace(name, b64buf(data), { display: 'block' });
+      await face.load();
+      document.fonts.add(face);
+      fonts.push(name);
+    } catch {
+      /* телефон не принял шрифт — рамки и питомцы всё равно ставим */
+    }
   }
   const root = document.documentElement;
   for (const [k, data] of Object.entries(p.img)) root.style.setProperty(`--g-${k}`, `url("data:image/png;base64,${data}")`);
