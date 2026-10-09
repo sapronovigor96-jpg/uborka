@@ -121,7 +121,7 @@ function skinSection() {
       <div class="row"><div>Пиксельный стиль<small>День или ночь — как тема телефона</small></div>${sw('skin', pixel)}</div>
       ${pixel ? `<div class="row"><div>Пакет игры<small>${K.pack ? 'Загружен: шрифты, рамки и питомцы из Stardew' : 'Шрифты, рамки и питомцы из Stardew. Хранится только на этом телефоне'}</small></div></div>
         ${K.pack ? lookHtml() : ''}
-        <label class="btn wide">${K.pack ? 'Заменить пакет' : 'Загрузить пакет игры'}<input type="file" accept="application/json,.json" data-act="pack" hidden></label>
+        <label class="btn wide">${K.pack ? 'Заменить пакет' : 'Загрузить пакет игры'}<input type="file" data-act="pack" hidden></label>
         ${K.pack ? `<button class="btn wide ghost confirm" data-act="pack-del">${armed === 'pack-del' ? 'Точно убрать пакет? Нажмите ещё раз' : 'Убрать пакет с телефона'}</button>` : ''}` : ''}
     </div>`;
 }
@@ -525,7 +525,7 @@ function renderSettings() {
     <div class="card stack">
       <p class="small mut" style="margin:0">Данные хранятся только на этом телефоне. Копия — файл, который можно сохранить и потом загрузить обратно.</p>
       <button class="btn wide" data-act="export">Сохранить копию</button>
-      <label class="btn wide ghost">Загрузить из копии<input type="file" accept="application/json,.json" data-act="import" hidden></label>
+      <label class="btn wide ghost">Загрузить из копии<input type="file" data-act="import" hidden></label>
     </div>
     <div class="sec-title">Для тестирования</div>
     <div class="card stack">
