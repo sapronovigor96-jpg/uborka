@@ -102,8 +102,48 @@ function house(zones, glowZones = []) {
 function petsHtml() {
   const h = st.household;
   if (!h.dog && !h.cat) return '';
-  return `<div class="pets" aria-hidden="true">${h.dog ? '<i class="pet dog"></i>' : '<i></i>'}${h.cat ? '<i class="pet cat"></i>' : ''}</div>`;
+  const fresh = petEmo && now() < petEmo.until ? petEmo.kind : '';
+  const last = st.log[st.log.length - 1];
+  const mood = fresh || (st.pause === null && last && now() - last.at > 2 * L.DAY ? 'quiet' : '');
+  const pet = (k) => `<i class="pet ${k}" style="transform:translateX(${petX[k]}px)"><b class="emo"></b></i>`;
+  return `<div class="pets ${mood ? 'emo-' + mood : ''}" aria-hidden="true">${h.dog ? pet('dog') : '<i></i>'}${h.cat ? pet('cat') : ''}</div>`;
 }
+
+// Настроение и прогулки питомцев. Только в памяти: после перезагрузки сидят на местах.
+let petEmo = null; // { kind: 'heart' | 'note', until, run } — пузырёк над питомцами
+const petX = { dog: 0, cat: 0 }; // смещение от своего угла: пёс слева (+), кот справа (−)
+const PET_SPAN = 24; // дальше — таблички с текстом, их закрывать не надо
+const calm = () => !K.pack || document.hidden || matchMedia('(prefers-color-scheme: dark)').matches || matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function petGo(kind, x, fast) {
+  const el = document.querySelector(`.pet.${kind}`);
+  const from = petX[kind];
+  if (!el || x === from || el.classList.contains('walk')) return;
+  petX[kind] = x;
+  el.style.transitionDuration = Math.abs(x - from) / (fast ? 110 : 36) + 's';
+  el.classList.add('walk', x > from ? 'to-r' : 'to-l');
+  el.style.transform = `translateX(${x}px)`;
+  el.addEventListener('transitionend', () => el.classList.remove('walk', 'to-r', 'to-l'), { once: true });
+}
+
+function petCheer(kind) {
+  petEmo = { kind, until: now() + 3600, run: true };
+}
+
+// После отрисовки главной: пёс подбегает порадоваться и возвращается.
+function petAfter() {
+  if (!petEmo || !petEmo.run || calm()) return;
+  petEmo.run = false;
+  requestAnimationFrame(() => petGo('dog', PET_SPAN, true));
+  setTimeout(() => petGo('dog', 0), 3800);
+}
+
+setInterval(() => {
+  if (calm() || (petEmo && now() < petEmo.until + 4000)) return;
+  const kind = Math.random() < 0.5 ? 'dog' : 'cat';
+  const x = Math.round(Math.random() * PET_SPAN);
+  petGo(kind, kind === 'dog' ? x : -x);
+}, 7000);
 
 function lookHtml() {
   const h = st.household;
@@ -864,18 +904,29 @@ async function saveInbox() {
   render();
 }
 
+let finishFx = null;
+
 function confetti() {
   const box = document.createElement('div');
-  box.className = 'confetti';
+  // С пакетом игры — искры и звезда из Stardew, без него — прежние цветные бумажки.
+  const game = K.skin() === 'pixel' && K.pack && K.pack.img.includes('spark');
+  box.className = game ? 'confetti sparks' : 'confetti';
   const colors = ['#eab87f', '#a6c191', '#f6c97f', '#f2e8d9'];
   for (let i = 0; i < 36; i++) {
     const p = document.createElement('i');
     p.style.left = Math.random() * 100 + 'vw';
-    p.style.background = colors[i % colors.length];
-    p.style.animationDelay = Math.random() * 0.5 + 's';
-    p.style.animationDuration = 1.2 + Math.random() * 0.9 + 's';
+    if (game) {
+      p.style.top = Math.random() * 70 + 'vh';
+      p.style.setProperty('--sr', -(i % 4) * 33 + 'px');
+      p.style.animationDelay = Math.random() * 1.6 + 's';
+    } else {
+      p.style.background = colors[i % colors.length];
+      p.style.animationDelay = Math.random() * 0.5 + 's';
+      p.style.animationDuration = 1.2 + Math.random() * 0.9 + 's';
+    }
     box.appendChild(p);
   }
+  if (game) box.insertAdjacentHTML('beforeend', '<b class="big-star"></b>');
   document.body.appendChild(box);
   setTimeout(() => box.remove(), 2800);
 }
@@ -1379,6 +1430,7 @@ function markDone(id, at = now(), min) {
   L.complete(st, id, at, min ?? t.min);
   commit();
   buzz();
+  petCheer('heart');
   const last = st.log[st.log.length - 1];
   toast(`${pick(THANKS)} ${tname(t)} · +${last ? L.entryPoints(st, last) : 0}`, () => {
     L.undoComplete(st, id);
@@ -1524,8 +1576,13 @@ function renderSession() {
     const note = ss.ritual === 'morning' ? 'Утро началось с заботы. Хорошего дня.'
       : ss.ritual === 'evening' ? 'Дом готов ко сну — и вы тоже.'
       : ss.done >= 5 ? 'Теперь можно заварить чай и полюбоваться.' : 'Маленький шаг — тоже шаг. Дом это чувствует.';
+    if (ss.done && finishFx !== ss) {
+      finishFx = ss; // праздник один раз, а не при каждой перерисовке экрана
+      petCheer('note');
+      confetti();
+    }
     inner(`<div class="s-body finish">
-      ${ss.done ? house(L.zonesShown(st), touched) : ''}
+      ${ss.done ? `<div class="fin-art">${house(L.zonesShown(st), touched)}</div>` : ''}
       ${say(ss.done ? pick(FINISH_LINES) : 'Ничего, я подожду. Дом никуда не денется.', ss.done ? 'cheer' : 'calm')}
       <h1>${ss.done ? 'Дом стал уютнее' : 'Хорошо, что заглянули'}</h1>
       <p class="mut">${ss.done ? `${dela(ss.done)} за ${mins} мин${zones.length ? ' · ' + esc(zones.join(', ')) : ''}` : 'Вернётесь, когда будут силы — дом подождёт.'}</p>
@@ -1780,7 +1837,7 @@ function render() {
   }
   $('#setup').hidden = true;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  if (tab === 'now') renderNow();
+  if (tab === 'now') (renderNow(), petAfter());
   else if (tab === 'home') renderHome();
   else if (tab === 'score') renderScore();
   else renderSettings();

@@ -102,7 +102,12 @@ async function titleFont() {
 
 const cursors = (await unpack('LooseSprites/Cursors.ru-RU.xnb')).png;
 const menu = (await unpack('Maps/MenuTiles.xnb')).png;
+const cursors16 = (await unpack('LooseSprites/Cursors_1_6.xnb')).png;
 const img = {
+  emotes: whole((await unpack('TileSheets/emotes.xnb')).png), // пузырьки настроения: 16×16, 4 кадра в ряду
+  spark: crop(cursors16, 304, 364, 132, 44), // искры: 4 цвета × 12 кадров по 11×11
+  star: crop(cursors, 192, 128, 64, 64),
+  rainbow: crop(cursors16, 258, 108, 134, 112),
   box: crop(cursors, 384, 373, 18, 18), // пергамент в тёмной раме
   light: crop(cursors, 293, 360, 24, 24), // светлая рамка — кнопки
   menu: crop(menu, 0, 256, 60, 60), // рамка меню

@@ -207,6 +207,49 @@ html.has-pack .pet.cat { background-image: var(--g-cat); --row: -320px; --x0: 0p
 html.has-pack .pet { background-position: var(--x0) var(--row); }
 @keyframes pet-a { 0% { background-position: var(--x0) var(--row); } 50% { background-position: var(--x1) var(--row); } }
 
+/* Прогулка: ряд 1 листа — идёт вправо, ряд 3 — влево, по 4 кадра */
+html.has-pack .pet { position: relative; transition: transform linear; }
+html.has-pack .pets { z-index: 1; } /* гуляют перед табличками, а не под ними */
+html.has-pack .pet.walk { animation: pet-w .5s steps(4) infinite; }
+html.has-pack .pet.walk.to-r { --row: -64px; }
+html.has-pack .pet.walk.to-l { --row: -192px; }
+@keyframes pet-w { from { background-position: 0 var(--row); } to { background-position: -256px var(--row); } }
+
+/* Пузырёк настроения над питомцем: лист emotes, кадр 16×16 показан ×2, ряд задаёт --er */
+html.has-pack .emo {
+  position: absolute; left: 16px; top: -20px; width: 32px; height: 32px; opacity: 0;
+  background: var(--g-emotes) 0 var(--er, 0) / 128px auto; image-rendering: pixelated;
+}
+html.has-pack .emo-heart .emo { --er: -160px; animation: emo-f .8s steps(4) infinite, emo-once 3.4s forwards; }
+html.has-pack .emo-note .emo { --er: -448px; animation: emo-f .8s steps(4) infinite, emo-once 3.4s forwards; }
+html.has-pack .emo-quiet .emo { --er: -320px; animation: emo-f 1.6s steps(4) infinite, emo-show 12s infinite; }
+@media (prefers-color-scheme: dark) {
+  html.has-pack .pets:not(.emo-heart, .emo-note) .emo { --er: -192px; animation: emo-f 2.4s steps(4) infinite, emo-show 12s infinite; } /* Zzz */
+}
+@keyframes emo-f { to { background-position-x: -128px; } }
+@keyframes emo-show { 0%, 30%, 100% { opacity: 0; } 4%, 26% { opacity: 1; } }
+@keyframes emo-once { 0%, 100% { opacity: 0; } 8%, 85% { opacity: 1; } }
+
+/* Финал уборки с пакетом: искры, большая звезда, радуга за домиком */
+html.has-pack .confetti.sparks i {
+  width: 33px; height: 33px; border-radius: 0; opacity: 0;
+  background: var(--g-spark) 0 var(--sr, 0) / 396px auto no-repeat; image-rendering: pixelated;
+  animation: spark 1s steps(12) forwards;
+}
+@keyframes spark { from { background-position-x: 0; opacity: 1; } to { background-position-x: -396px; opacity: 1; } }
+html.has-pack .big-star {
+  position: absolute; left: 50%; top: 4%; width: 128px; height: 128px; margin-left: -64px;
+  background: var(--g-star) center / contain no-repeat; image-rendering: pixelated;
+  animation: big-star 2.4s steps(8) forwards;
+}
+@keyframes big-star { 0% { transform: scale(0); opacity: 1; } 15%, 75% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.25); opacity: 0; } }
+html.has-pack .fin-art { position: relative; }
+html.has-pack .fin-art::before {
+  content: ''; position: absolute; left: 50%; top: -34px; width: 268px; height: 224px; margin-left: -134px;
+  background: var(--g-rainbow) center / contain no-repeat; image-rendering: pixelated; pointer-events: none;
+}
+html.has-pack .fin-art .house { position: relative; }
+
 /* ---------- нижние вкладки: деревянная панель ---------- */
 html[data-skin='pixel'] .tabs {
   background: var(--wood); border-top: 0; backdrop-filter: none;
